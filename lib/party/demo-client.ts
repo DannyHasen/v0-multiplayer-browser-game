@@ -19,6 +19,17 @@ function generatePlayerId(): string {
 }
 
 // Demo client that simulates a multiplayer session locally
+// Game constants for physics
+const ARENA_WIDTH = 1200
+const ARENA_HEIGHT = 700
+const PLAYER_SPEED = 5
+const DASH_SPEED = 15
+const DASH_DURATION = 150 // ms
+const DASH_COOLDOWN = 3000 // ms
+const ABILITY_COOLDOWN = 5000 // ms
+const SHOCKWAVE_RADIUS = 100
+const SHOCKWAVE_DAMAGE = 20
+
 export class DemoClient {
   private roomId: string
   private messageHandler: MessageHandler
@@ -30,6 +41,30 @@ export class DemoClient {
   private paused = false
   private gameLoopInterval: NodeJS.Timer | null = null
   private gameStartTime: number | null = null
+  
+  // Player input state
+  private currentInput: InputState = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    dash: false,
+    ability: false,
+  }
+  
+  // Game state tracking
+  private playerStates: Map<string, {
+    x: number
+    y: number
+    vx: number
+    vy: number
+    score: number
+    health: number
+    isDashing: boolean
+    dashEndTime: number
+    lastDashTime: number
+    lastAbilityTime: number
+  }> = new Map()
 
   constructor(options: DemoClientOptions, existingRoom?: Room | null, existingPlayerId?: string | null) {
     this.roomId = options.roomId
@@ -244,38 +279,175 @@ export class DemoClient {
     this.runGameLoop()
   }
 
+  private initializePlayerStates(): void {
+    // Initialize player positions in a circle around the center
+    const centerX = ARENA_WIDTH / 2
+    const centerY = ARENA_HEIGHT / 2
+    const radius = 150
+    
+    this.room.players.forEach((player, i) => {
+      const angle = (i / this.room.players.length) * Math.PI * 2
+      this.playerStates.set(player.id, {
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+        vx: 0,
+        vy: 0,
+        score: 0,
+        health: 100,
+        isDashing: false,
+        dashEndTime: 0,
+        lastDashTime: 0,
+        lastAbilityTime: 0,
+      })
+    })
+  }
+
   private runGameLoop(): void {
-    // Simulate game state updates
     const startTime = this.gameStartTime || Date.now()
     
+    // Initialize player positions
+    this.initializePlayerStates()
+    
+    // Store pickups with positions
+    const pickups = [
+      { id: "p1", type: "energy" as const, x: 150, y: 150, collected: false },
+      { id: "p2", type: "energy" as const, x: ARENA_WIDTH - 150, y: 150, collected: false },
+      { id: "p3", type: "boost" as const, x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+      { id: "p4", type: "energy" as const, x: 150, y: ARENA_HEIGHT - 150, collected: false },
+      { id: "p5", type: "energy" as const, x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
+    ]
+    
     this.gameLoopInterval = setInterval(() => {
-      if (!this.connected) {
-        this.stopGameLoop()
+      if (!this.connected || this.paused) {
         return
       }
       
-      const elapsed = (Date.now() - startTime) / 1000
+      const now = Date.now()
+      const elapsed = (now - startTime) / 1000
       const timeRemaining = Math.max(0, this.room.settings.matchDuration - elapsed)
       
-      // Create game state with player positions
+      // Process player movement
+      this.room.players.forEach((player, index) => {
+        const state = this.playerStates.get(player.id)
+        if (!state) return
+        
+        // Get input - only process for the human player
+        const isHumanPlayer = player.id === this._playerId
+        const input = isHumanPlayer ? this.currentInput : this.getAIInput(player.id, index, now)
+        
+        // Calculate velocity based on input
+        let speed = PLAYER_SPEED
+        
+        // Handle dashing
+        if (state.isDashing && now < state.dashEndTime) {
+          speed = DASH_SPEED
+        } else if (state.isDashing) {
+          state.isDashing = false
+        }
+        
+        // Start dash if requested and cooldown is over
+        if (input.dash && !state.isDashing && now - state.lastDashTime > DASH_COOLDOWN) {
+          state.isDashing = true
+          state.dashEndTime = now + DASH_DURATION
+          state.lastDashTime = now
+        }
+        
+        // Calculate movement direction
+        let dx = 0
+        let dy = 0
+        if (input.up) dy -= 1
+        if (input.down) dy += 1
+        if (input.left) dx -= 1
+        if (input.right) dx += 1
+        
+        // Normalize diagonal movement
+        if (dx !== 0 && dy !== 0) {
+          const len = Math.sqrt(dx * dx + dy * dy)
+          dx /= len
+          dy /= len
+        }
+        
+        // Apply velocity
+        state.vx = dx * speed
+        state.vy = dy * speed
+        
+        // Update position
+        state.x += state.vx
+        state.y += state.vy
+        
+        // Keep player in bounds
+        state.x = Math.max(20, Math.min(ARENA_WIDTH - 20, state.x))
+        state.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, state.y))
+        
+        // Handle ability (shockwave)
+        if (input.ability && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
+          state.lastAbilityTime = now
+          // Check for nearby players to damage
+          this.room.players.forEach(otherPlayer => {
+            if (otherPlayer.id === player.id) return
+            const otherState = this.playerStates.get(otherPlayer.id)
+            if (!otherState) return
+            
+            const dist = Math.sqrt(
+              Math.pow(otherState.x - state.x, 2) + 
+              Math.pow(otherState.y - state.y, 2)
+            )
+            
+            if (dist < SHOCKWAVE_RADIUS) {
+              otherState.health -= SHOCKWAVE_DAMAGE
+              state.score += 50 // Points for hitting
+              
+              // Knockback
+              const angle = Math.atan2(otherState.y - state.y, otherState.x - state.x)
+              otherState.x += Math.cos(angle) * 50
+              otherState.y += Math.sin(angle) * 50
+              
+              // Keep in bounds after knockback
+              otherState.x = Math.max(20, Math.min(ARENA_WIDTH - 20, otherState.x))
+              otherState.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, otherState.y))
+            }
+          })
+        }
+        
+        // Check pickup collisions
+        pickups.forEach(pickup => {
+          if (pickup.collected) return
+          const dist = Math.sqrt(
+            Math.pow(pickup.x - state.x, 2) + 
+            Math.pow(pickup.y - state.y, 2)
+          )
+          if (dist < 30) {
+            pickup.collected = true
+            state.score += pickup.type === "boost" ? 100 : 25
+            
+            // Respawn pickup after 5 seconds
+            setTimeout(() => {
+              pickup.collected = false
+              pickup.x = Math.random() * (ARENA_WIDTH - 100) + 50
+              pickup.y = Math.random() * (ARENA_HEIGHT - 100) + 50
+            }, 5000)
+          }
+        })
+      })
+      
+      // Build game state
       const gameState: GameState = {
-        players: this.room.players.map((p, i) => ({
-          ...p,
-          x: 400 + Math.sin(Date.now() / 1000 + i) * 200,
-          y: 300 + Math.cos(Date.now() / 800 + i) * 150,
-          vx: Math.cos(Date.now() / 500 + i) * 2,
-          vy: Math.sin(Date.now() / 500 + i) * 2,
-          health: 100,
-          score: Math.floor(elapsed * 10 + i * 20),
-        })),
-        pickups: [
-          { id: "1", type: "energy", x: 200, y: 200, collected: false },
-          { id: "2", type: "energy", x: 600, y: 400, collected: false },
-          { id: "3", type: "boost", x: 400, y: 300, collected: false },
-        ],
-        hazards: [
-          { id: "h1", type: "static", x: 100, y: 100, width: 60, height: 60 },
-        ],
+        players: this.room.players.map(player => {
+          const state = this.playerStates.get(player.id)!
+          return {
+            ...player,
+            x: state.x,
+            y: state.y,
+            vx: state.vx,
+            vy: state.vy,
+            score: state.score,
+            health: state.health,
+            dashCooldown: Math.max(0, DASH_COOLDOWN - (now - state.lastDashTime)) / 1000,
+            abilityCooldown: Math.max(0, ABILITY_COOLDOWN - (now - state.lastAbilityTime)) / 1000,
+          }
+        }),
+        pickups: pickups.filter(p => !p.collected),
+        hazards: [],
         timeRemaining,
         matchState: "playing",
       }
@@ -291,7 +463,51 @@ export class DemoClient {
           .sort((a, b) => b.score - a.score)
         this.messageHandler({ type: "game_end", scores })
       }
-    }, 1000 / 30) // 30 FPS updates
+    }, 1000 / 60) // 60 FPS updates for smoother gameplay
+  }
+  
+  // Simple AI for bots
+  private getAIInput(playerId: string, index: number, now: number): InputState {
+    const state = this.playerStates.get(playerId)
+    if (!state) return { up: false, down: false, left: false, right: false, dash: false, ability: false }
+    
+    // Simple wandering AI
+    const time = now / 1000 + index * 2
+    const targetX = ARENA_WIDTH / 2 + Math.sin(time * 0.5) * 300
+    const targetY = ARENA_HEIGHT / 2 + Math.cos(time * 0.7) * 200
+    
+    const dx = targetX - state.x
+    const dy = targetY - state.y
+    
+    // Chase human player occasionally
+    const humanState = this.playerStates.get(this._playerId)
+    if (humanState && Math.random() < 0.3) {
+      const distToHuman = Math.sqrt(
+        Math.pow(humanState.x - state.x, 2) +
+        Math.pow(humanState.y - state.y, 2)
+      )
+      
+      // Use ability when close to human
+      const useAbility = distToHuman < 80 && now - state.lastAbilityTime > ABILITY_COOLDOWN
+      
+      return {
+        up: humanState.y < state.y - 10,
+        down: humanState.y > state.y + 10,
+        left: humanState.x < state.x - 10,
+        right: humanState.x > state.x + 10,
+        dash: distToHuman < 150 && Math.random() < 0.05,
+        ability: useAbility,
+      }
+    }
+    
+    return {
+      up: dy < -10,
+      down: dy > 10,
+      left: dx < -10,
+      right: dx > 10,
+      dash: Math.random() < 0.01,
+      ability: Math.random() < 0.005,
+    }
   }
 
   private stopGameLoop(): void {
@@ -301,8 +517,9 @@ export class DemoClient {
     }
   }
 
-  sendInput(input: InputState, sequenceNumber: number): void {
-    // In demo mode, input is processed locally by the game renderer
+  sendInput(input: InputState, _sequenceNumber: number): void {
+    // Store the input to be processed in the game loop
+    this.currentInput = { ...input }
   }
 
   leave(): void {
