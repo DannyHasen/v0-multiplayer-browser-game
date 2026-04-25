@@ -257,3 +257,13 @@ export const useCanStartGame = () =>
     if (state.room.players.length < 2) return false
     return state.room.players.every((p) => p.isReady)
   })
+
+// Hook to reset room state before joining a new room
+export const useResetRoom = () => {
+  const setRoom = useGameStore((state) => state.setRoom)
+  const setPlayerId = useGameStore((state) => state.setPlayerId)
+  return () => {
+    setRoom(null)
+    setPlayerId(null)
+  }
+}

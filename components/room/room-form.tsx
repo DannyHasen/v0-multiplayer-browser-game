@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, Users, ArrowLeft } from "lucide-react"
-import { useGameStore } from "@/store/game-store"
+import { useGameStore, useResetRoom } from "@/store/game-store"
 import { PLAYER_COLORS, type PlayerColor } from "@/types/game"
 import { generateRoomCode, isValidRoomCode, isValidNickname } from "@/lib/game/constants"
 import Link from "next/link"
@@ -21,6 +21,7 @@ const colorOptions: PlayerColor[] = [
 export function RoomForm() {
   const router = useRouter()
   const { settings, updateSettings } = useGameStore()
+  const resetRoom = useResetRoom()
   
   const [nickname, setNickname] = useState(settings.nickname || "")
   const [selectedColor, setSelectedColor] = useState<PlayerColor>(settings.color || "cyan")
@@ -48,6 +49,9 @@ export function RoomForm() {
     // Save settings
     updateSettings({ nickname: nickname.trim(), color: selectedColor })
     
+    // Reset any existing room state before navigating
+    resetRoom()
+    
     // Generate room code and navigate
     const roomCode = generateRoomCode()
     router.push(`/lobby/${roomCode}`)
@@ -71,6 +75,9 @@ export function RoomForm() {
     
     // Save settings
     updateSettings({ nickname: nickname.trim(), color: selectedColor })
+    
+    // Reset any existing room state before navigating
+    resetRoom()
     
     // Navigate to lobby
     router.push(`/lobby/${code}`)

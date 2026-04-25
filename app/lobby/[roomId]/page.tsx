@@ -270,7 +270,28 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
             Leave Room
           </Button>
 
-          {isHost ? (
+          {/* Ready Up button - everyone needs to ready */}
+          <Button
+            onClick={handleToggleReady}
+            className={`w-full sm:w-auto gap-2 ${
+              currentPlayer?.isReady
+                ? "bg-green-500/20 text-green-500 border-green-500/50 hover:bg-green-500/30"
+                : "neon-glow-magenta bg-accent text-accent-foreground hover:bg-accent/90"
+            }`}
+            variant={currentPlayer?.isReady ? "outline" : "default"}
+          >
+            {currentPlayer?.isReady ? (
+              <>
+                <Check className="w-4 h-4" />
+                Ready!
+              </>
+            ) : (
+              "Ready Up"
+            )}
+          </Button>
+
+          {/* Start button - only for host */}
+          {isHost && (
             <Button
               onClick={handleStartGame}
               disabled={!canStart}
@@ -278,25 +299,6 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
             >
               <Play className="w-4 h-4" />
               Start Game ({ready}/{total} Ready)
-            </Button>
-          ) : (
-            <Button
-              onClick={handleToggleReady}
-              className={`w-full sm:w-auto gap-2 ${
-                currentPlayer?.isReady
-                  ? "bg-green-500/20 text-green-500 border-green-500/50 hover:bg-green-500/30"
-                  : "neon-glow-magenta bg-accent text-accent-foreground hover:bg-accent/90"
-              }`}
-              variant={currentPlayer?.isReady ? "outline" : "default"}
-            >
-              {currentPlayer?.isReady ? (
-                <>
-                  <Check className="w-4 h-4" />
-                  Ready!
-                </>
-              ) : (
-                "Ready Up"
-              )}
             </Button>
           )}
         </motion.div>
