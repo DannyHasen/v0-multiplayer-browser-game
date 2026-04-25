@@ -186,15 +186,20 @@ export class DemoClient {
     if (this.botsAdded) return
     this.botsAdded = true
     
-    // Add 1-2 AI players after a short delay
+    // Add AI players based on maxPlayers setting
     const aiColors: PlayerColor[] = ["magenta", "yellow", "lime"]
     const aiNames = ["NeonBot", "CyberAce", "PixelPunk"]
     
-    const numBots = Math.floor(Math.random() * 2) + 1
+    // Calculate how many bots to add (respect maxPlayers, leave at least 1 spot for human)
+    const maxBots = Math.min(this.room.settings.maxPlayers - 1, 3) // Max 3 bots
+    const numBots = Math.max(1, maxBots - this.room.players.length + 1) // At least 1 bot
     
     for (let i = 0; i < numBots; i++) {
       setTimeout(() => {
         if (!this.connected) return
+        
+        // Check if adding this bot would exceed maxPlayers
+        if (this.room.players.length >= this.room.settings.maxPlayers) return
         
         const aiId = `bot-${i}-${this.roomId}`
         
@@ -308,13 +313,20 @@ export class DemoClient {
     // Initialize player positions
     this.initializePlayerStates()
     
-    // Store pickups with positions
-    const pickups = [
-      { id: "p1", type: "energy" as const, x: 150, y: 150, collected: false },
-      { id: "p2", type: "energy" as const, x: ARENA_WIDTH - 150, y: 150, collected: false },
-      { id: "p3", type: "boost" as const, x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
-      { id: "p4", type: "energy" as const, x: 150, y: ARENA_HEIGHT - 150, collected: false },
-      { id: "p5", type: "energy" as const, x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
+    // Store pickups with positions and respawn tracking
+    const pickups: Array<{
+      id: string
+      type: "energy" | "boost"
+      x: number
+      y: number
+      collected: boolean
+      respawnAt?: number
+    }> = [
+      { id: "p1", type: "energy", x: 150, y: 150, collected: false },
+      { id: "p2", type: "energy", x: ARENA_WIDTH - 150, y: 150, collected: false },
+      { id: "p3", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+      { id: "p4", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
+      { id: "p5", type: "energy", x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
     ]
     
     this.gameLoopInterval = setInterval(() => {
@@ -394,17 +406,26 @@ export class DemoClient {
             )
             
             if (dist < SHOCKWAVE_RADIUS) {
-              otherState.health -= SHOCKWAVE_DAMAGE
+              otherState.health = Math.max(0, otherState.health - SHOCKWAVE_DAMAGE)
               state.score += 50 // Points for hitting
               
-              // Knockback
-              const angle = Math.atan2(otherState.y - state.y, otherState.x - state.x)
-              otherState.x += Math.cos(angle) * 50
-              otherState.y += Math.sin(angle) * 50
-              
-              // Keep in bounds after knockback
-              otherState.x = Math.max(20, Math.min(ARENA_WIDTH - 20, otherState.x))
-              otherState.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, otherState.y))
+              // Bonus points for knockout
+              if (otherState.health <= 0) {
+                state.score += 200
+                // Respawn the knocked out player
+                otherState.health = 100
+                otherState.x = ARENA_WIDTH / 2 + (Math.random() - 0.5) * 200
+                otherState.y = ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 200
+              } else {
+                // Knockback only if not knocked out
+                const angle = Math.atan2(otherState.y - state.y, otherState.x - state.x)
+                otherState.x += Math.cos(angle) * 50
+                otherState.y += Math.sin(angle) * 50
+                
+                // Keep in bounds after knockback
+                otherState.x = Math.max(20, Math.min(ARENA_WIDTH - 20, otherState.x))
+                otherState.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, otherState.y))
+              }
             }
           })
         }
@@ -418,16 +439,20 @@ export class DemoClient {
           )
           if (dist < 30) {
             pickup.collected = true
+            pickup.respawnAt = now + 5000 // Track when to respawn
             state.score += pickup.type === "boost" ? 100 : 25
-            
-            // Respawn pickup after 5 seconds
-            setTimeout(() => {
-              pickup.collected = false
-              pickup.x = Math.random() * (ARENA_WIDTH - 100) + 50
-              pickup.y = Math.random() * (ARENA_HEIGHT - 100) + 50
-            }, 5000)
           }
         })
+      })
+      
+      // Handle pickup respawning (outside of player loop)
+      pickups.forEach(pickup => {
+        if (pickup.collected && pickup.respawnAt && now >= pickup.respawnAt) {
+          pickup.collected = false
+          pickup.respawnAt = undefined
+          pickup.x = Math.random() * (ARENA_WIDTH - 200) + 100
+          pickup.y = Math.random() * (ARENA_HEIGHT - 200) + 100
+        }
       })
       
       // Build game state
@@ -466,47 +491,67 @@ export class DemoClient {
     }, 1000 / 60) // 60 FPS updates for smoother gameplay
   }
   
-  // Simple AI for bots
+  // AI state tracking (persistent per bot)
+  private aiTargets: Map<string, { x: number; y: number; changeAt: number }> = new Map()
+  
+  // Smarter AI for bots
   private getAIInput(playerId: string, index: number, now: number): InputState {
     const state = this.playerStates.get(playerId)
     if (!state) return { up: false, down: false, left: false, right: false, dash: false, ability: false }
     
-    // Simple wandering AI
-    const time = now / 1000 + index * 2
-    const targetX = ARENA_WIDTH / 2 + Math.sin(time * 0.5) * 300
-    const targetY = ARENA_HEIGHT / 2 + Math.cos(time * 0.7) * 200
-    
-    const dx = targetX - state.x
-    const dy = targetY - state.y
-    
-    // Chase human player occasionally
     const humanState = this.playerStates.get(this._playerId)
-    if (humanState && Math.random() < 0.3) {
+    
+    // Get or create AI target
+    let aiTarget = this.aiTargets.get(playerId)
+    if (!aiTarget || now > aiTarget.changeAt) {
+      // Pick a new random target every 2-4 seconds
+      aiTarget = {
+        x: Math.random() * (ARENA_WIDTH - 200) + 100,
+        y: Math.random() * (ARENA_HEIGHT - 200) + 100,
+        changeAt: now + 2000 + Math.random() * 2000,
+      }
+      this.aiTargets.set(playerId, aiTarget)
+    }
+    
+    let targetX = aiTarget.x
+    let targetY = aiTarget.y
+    let shouldDash = false
+    let shouldAbility = false
+    
+    // Chase human player if they're nearby
+    if (humanState) {
       const distToHuman = Math.sqrt(
         Math.pow(humanState.x - state.x, 2) +
         Math.pow(humanState.y - state.y, 2)
       )
       
-      // Use ability when close to human
-      const useAbility = distToHuman < 80 && now - state.lastAbilityTime > ABILITY_COOLDOWN
-      
-      return {
-        up: humanState.y < state.y - 10,
-        down: humanState.y > state.y + 10,
-        left: humanState.x < state.x - 10,
-        right: humanState.x > state.x + 10,
-        dash: distToHuman < 150 && Math.random() < 0.05,
-        ability: useAbility,
+      // Chase if human is within range
+      if (distToHuman < 300) {
+        targetX = humanState.x
+        targetY = humanState.y
+        
+        // Dash to catch up if medium distance
+        if (distToHuman > 100 && distToHuman < 200 && now - state.lastDashTime > DASH_COOLDOWN) {
+          shouldDash = true
+        }
+        
+        // Use ability when very close
+        if (distToHuman < 90 && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
+          shouldAbility = true
+        }
       }
     }
     
+    const dx = targetX - state.x
+    const dy = targetY - state.y
+    
     return {
-      up: dy < -10,
-      down: dy > 10,
-      left: dx < -10,
-      right: dx > 10,
-      dash: Math.random() < 0.01,
-      ability: Math.random() < 0.005,
+      up: dy < -15,
+      down: dy > 15,
+      left: dx < -15,
+      right: dx > 15,
+      dash: shouldDash,
+      ability: shouldAbility,
     }
   }
 
