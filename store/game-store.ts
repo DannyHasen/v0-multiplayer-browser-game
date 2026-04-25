@@ -233,38 +233,22 @@ export const useGameStore = create<GameStore>()(
 )
 
 // Selector hooks for common patterns
-// For primitive returns, use regular selectors
-// For object returns, use useShallow as the equality function
+// These return PRIMITIVE values only to avoid infinite loops
 export const useIsHost = () => 
   useGameStore((state) => state.room?.hostId === state.playerId && state.playerId !== null)
 
-export const useCurrentPlayer = () =>
-  useGameStore((state) => {
-    if (!state.room || !state.playerId) return null
-    return state.room.players.find((p) => p.id === state.playerId) || null
-  })
+export const useCurrentPlayerId = () =>
+  useGameStore((state) => state.playerId)
 
-export const useOtherPlayers = () =>
-  useGameStore(
-    (state) => {
-      if (!state.room || !state.playerId) return []
-      return state.room.players.filter((p) => p.id !== state.playerId)
-    },
-    (a, b) => JSON.stringify(a) === JSON.stringify(b)
-  )
+export const useRoomPlayers = () =>
+  useGameStore((state) => state.room?.players ?? [])
 
-// For object returns, use a custom equality function
-export const useReadyCount = () =>
-  useGameStore(
-    (state) => {
-      const players = state.room?.players
-      return {
-        ready: players?.filter((p) => p.isReady).length ?? 0,
-        total: players?.length ?? 0,
-      }
-    },
-    (a, b) => a.ready === b.ready && a.total === b.total
-  )
+// Return primitives to avoid snapshot caching issues
+export const useReadyCountReady = () =>
+  useGameStore((state) => state.room?.players?.filter((p) => p.isReady).length ?? 0)
+
+export const useReadyCountTotal = () =>
+  useGameStore((state) => state.room?.players?.length ?? 0)
 
 export const useCanStartGame = () =>
   useGameStore((state) => {

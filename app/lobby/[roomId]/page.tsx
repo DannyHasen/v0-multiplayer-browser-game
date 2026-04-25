@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, use, useMemo } from "react"
+import { useEffect, useState, useCallback, use, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,7 @@ import { AnimatedBackground } from "@/components/landing/animated-background"
 import { PlayerList } from "@/components/room/player-list"
 import { LobbySettings } from "@/components/room/lobby-settings"
 import { ConnectionBadge } from "@/components/room/connection-badge"
-import { useGameStore, useIsHost, useReadyCount, useCanStartGame } from "@/store/game-store"
+import { useGameStore, useIsHost, useReadyCountReady, useReadyCountTotal, useCanStartGame } from "@/store/game-store"
 import { createDemoClient, destroyDemoClient, getDemoClient } from "@/lib/party/demo-client"
 import type { ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
@@ -20,6 +20,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   const { roomId } = use(params)
   const router = useRouter()
   const [copied, setCopied] = useState(false)
+  const hasConnectedRef = useRef(false)
   
   const {
     settings,
@@ -38,43 +39,54 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   } = useGameStore()
 
   const isHost = useIsHost()
-  const { ready, total } = useReadyCount()
+  const ready = useReadyCountReady()
+  const total = useReadyCountTotal()
   const canStart = useCanStartGame()
 
-  // Handle incoming messages from the server
-  const handleMessage = useCallback((message: ServerMessage) => {
-    switch (message.type) {
-      case "room_state":
-        setRoom(message.room)
-        break
-      case "player_joined":
-        toast.success(`${message.player.nickname} joined the room`)
-        break
-      case "player_left":
-        toast.info("A player left the room")
-        break
-      case "countdown_start":
-        // Navigate to game page
-        router.push(`/game/${roomId}`)
-        break
-      case "error":
-        toast.error(message.message)
-        if (message.message.includes("not found") || message.message.includes("full")) {
-          router.push("/play")
-        }
-        break
-    }
-  }, [setRoom, router, roomId])
+  // Store callbacks in refs to avoid useEffect re-runs
+  const setRoomRef = useRef(setRoom)
+  const routerRef = useRef(router)
+  setRoomRef.current = setRoom
+  routerRef.current = router
 
   // Connect using demo client (for testing without PartyKit server)
+  // Only run once on mount
   useEffect(() => {
+    // Prevent double connection in strict mode
+    if (hasConnectedRef.current) return
+    
     if (!settings.nickname) {
       router.push("/play")
       return
     }
 
+    hasConnectedRef.current = true
     setConnecting(true)
     setConnectionError(null)
+
+    // Create message handler that uses refs to avoid stale closures
+    const handleMessage = (message: ServerMessage) => {
+      switch (message.type) {
+        case "room_state":
+          setRoomRef.current(message.room)
+          break
+        case "player_joined":
+          toast.success(`${message.player.nickname} joined the room`)
+          break
+        case "player_left":
+          toast.info("A player left the room")
+          break
+        case "countdown_start":
+          routerRef.current.push(`/game/${roomId}`)
+          break
+        case "error":
+          toast.error(message.message)
+          if (message.message.includes("not found") || message.message.includes("full")) {
+            routerRef.current.push("/play")
+          }
+          break
+      }
+    }
 
     const client = createDemoClient({
       roomId,
@@ -103,8 +115,10 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
 
     return () => {
       destroyDemoClient()
+      hasConnectedRef.current = false
     }
-  }, [roomId, settings.nickname, settings.color, handleMessage, router, setConnected, setConnecting, setConnectionError, setPlayerId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId])
 
   const handleCopyCode = async () => {
     try {
