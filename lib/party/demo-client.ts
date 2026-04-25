@@ -66,7 +66,7 @@ export class DemoClient {
     lastAbilityTime: number
   }> = new Map()
 
-  constructor(options: DemoClientOptions, existingRoom?: Room | null, existingPlayerId?: string | null) {
+  constructor(options: DemoClientOptions, existingRoom?: Room | null, existingPlayerId?: string | null, existingGameStartTime?: number | null) {
     this.roomId = options.roomId
     this.messageHandler = options.onMessage
     this.connectHandler = options.onConnect
@@ -84,6 +84,11 @@ export class DemoClient {
         mapTheme: "cyber",
       },
       hostId: "",
+    }
+    
+    // Restore game start time if provided (for page navigation during game)
+    if (existingGameStartTime) {
+      this.gameStartTime = existingGameStartTime
     }
   }
 
@@ -110,6 +115,10 @@ export class DemoClient {
 
   getRoom(): Room {
     return { ...this.room }
+  }
+
+  getGameStartTime(): number | null {
+    return this.gameStartTime
   }
 
   pause(): void {
@@ -171,12 +180,18 @@ export class DemoClient {
       this.room.hostId = player.id
     }
     
-    // Add some AI players for demo
-    this.addDemoPlayers()
+    // Add bots after a short delay to let settings load from store
+    setTimeout(() => this.addDemoPlayers(), 500)
     
     // Send room state
     this.messageHandler({ type: "room_state", room: { ...this.room } })
     this.messageHandler({ type: "player_joined", player })
+  }
+  
+  // Allow updating settings from the UI
+  updateSettings(settings: Partial<RoomSettings>): void {
+    this.room.settings = { ...this.room.settings, ...settings }
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
   }
 
   private botsAdded = false
@@ -186,20 +201,25 @@ export class DemoClient {
     if (this.botsAdded) return
     this.botsAdded = true
     
-    // Add AI players based on maxPlayers setting
     const aiColors: PlayerColor[] = ["magenta", "yellow", "lime"]
     const aiNames = ["NeonBot", "CyberAce", "PixelPunk"]
     
-    // Calculate how many bots to add (respect maxPlayers, leave at least 1 spot for human)
-    const maxBots = Math.min(this.room.settings.maxPlayers - 1, 3) // Max 3 bots
-    const numBots = Math.max(1, maxBots - this.room.players.length + 1) // At least 1 bot
+    // Simple: add 1 bot for 2-player game, or fill up to maxPlayers-1 for larger games
+    const maxPlayers = this.room.settings.maxPlayers
+    const slotsForBots = maxPlayers - 1 // Leave 1 slot for the human
+    const numBots = Math.min(slotsForBots, 3) // Cap at 3 bots max
+    
+
     
     for (let i = 0; i < numBots; i++) {
       setTimeout(() => {
         if (!this.connected) return
         
-        // Check if adding this bot would exceed maxPlayers
-        if (this.room.players.length >= this.room.settings.maxPlayers) return
+        // Double-check we haven't exceeded maxPlayers
+        if (this.room.players.length >= maxPlayers) {
+
+          return
+        }
         
         const aiId = `bot-${i}-${this.roomId}`
         
@@ -483,12 +503,13 @@ export class DemoClient {
       if (timeRemaining <= 0) {
         this.stopGameLoop()
         this.room.state = "ended"
+        isGameRunning = false
         const scores = gameState.players
           .map(p => ({ playerId: p.id, nickname: p.nickname, score: p.score, color: p.color }))
           .sort((a, b) => b.score - a.score)
         this.messageHandler({ type: "game_end", scores })
       }
-    }, 1000 / 60) // 60 FPS updates for smoother gameplay
+    }, 1000 / 60) // 60 FPS updates
   }
   
   // AI state tracking (persistent per bot)
@@ -666,9 +687,9 @@ export function createDemoClient(options: DemoClientOptions): DemoClient {
   
   // Create new instance, restoring state if available
   if (shouldRestoreState) {
-    demoClientInstance = new DemoClient(options, persistedRoom, persistedPlayerId)
+    demoClientInstance = new DemoClient(options, persistedRoom, persistedPlayerId, gameStartTime)
   } else {
-    demoClientInstance = new DemoClient(options, null, null)
+    demoClientInstance = new DemoClient(options, null, null, null)
   }
   
   return demoClientInstance
@@ -680,6 +701,7 @@ export function destroyDemoClient(): void {
     // Save state before "destroying"
     persistedRoom = demoClientInstance.getRoom()
     persistedPlayerId = demoClientInstance.playerId
+    gameStartTime = demoClientInstance.getGameStartTime()
     demoClientInstance.pause()
   }
 }

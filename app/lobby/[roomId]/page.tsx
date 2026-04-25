@@ -153,7 +153,11 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
 
   const handleSettingsChange = useCallback((newSettings: Partial<RoomSettings>) => {
     updateRoomSettings(newSettings)
-    // TODO: Send settings update to server
+    // Sync settings to demo client
+    const client = getDemoClient()
+    if (client) {
+      client.updateSettings(newSettings)
+    }
   }, [updateRoomSettings])
 
   const currentPlayer = room?.players.find(p => p.id === playerId)
