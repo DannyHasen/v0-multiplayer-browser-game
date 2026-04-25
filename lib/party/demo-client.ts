@@ -27,16 +27,18 @@ export class DemoClient {
   private _playerId: string
   private room: Room
   private connected = false
+  private paused = false
   private gameLoopInterval: NodeJS.Timer | null = null
+  private gameStartTime: number | null = null
 
-  constructor(options: DemoClientOptions) {
+  constructor(options: DemoClientOptions, existingRoom?: Room | null, existingPlayerId?: string | null) {
     this.roomId = options.roomId
     this.messageHandler = options.onMessage
     this.connectHandler = options.onConnect
     this.disconnectHandler = options.onDisconnect
-    this._playerId = generatePlayerId()
+    this._playerId = existingPlayerId || generatePlayerId()
     
-    this.room = {
+    this.room = existingRoom || {
       id: this.roomId,
       code: this.roomId,
       players: [],
@@ -47,6 +49,44 @@ export class DemoClient {
         mapTheme: "cyber",
       },
       hostId: "",
+    }
+  }
+
+  updateHandlers(onMessage: MessageHandler, onConnect?: ConnectionHandler, onDisconnect?: ConnectionHandler): void {
+    this.messageHandler = onMessage
+    this.connectHandler = onConnect
+    this.disconnectHandler = onDisconnect
+    this.paused = false
+    
+    // Re-trigger connect if already connected
+    if (this.connected) {
+      this.connectHandler?.()
+      // Send current room state
+      this.messageHandler({ type: "room_state", room: { ...this.room } })
+      
+      // If game was in progress, restart the game loop immediately
+      if (this.room.state === "playing" || this.room.state === "countdown") {
+        if (!this.gameLoopInterval) {
+          this.continueGameLoop()
+        }
+      }
+    }
+  }
+
+  getRoom(): Room {
+    return { ...this.room }
+  }
+
+  pause(): void {
+    this.paused = true
+    // Don't stop the game loop, just pause updates
+  }
+
+  resumeGame(): void {
+    this.paused = false
+    if (this.room.state === "playing" && !this.gameLoopInterval) {
+      // Resume the game loop
+      this.continueGameLoop()
     }
   }
 
@@ -177,18 +217,36 @@ export class DemoClient {
     if (this.room.players.length < 2) return
     
     this.room.state = "countdown"
-    this.messageHandler({ type: "countdown_start", countdown: 3 })
+    // Store the time when game will start
+    this.gameStartTime = Date.now() + 3000
+    isGameRunning = true
+    this.messageHandler({ type: "countdown_start", countdown: 3, startTime: this.gameStartTime })
     
     // Start the game after countdown
     setTimeout(() => {
+      if (!this.connected) return
       this.room.state = "playing"
       this.startGameLoop()
     }, 3000)
   }
 
+  private continueGameLoop(): void {
+    // Resume game from where it left off
+    if (!this.gameStartTime) {
+      this.gameStartTime = Date.now()
+    }
+    this.runGameLoop()
+  }
+
   private startGameLoop(): void {
+    // Start fresh game
+    this.gameStartTime = Date.now()
+    this.runGameLoop()
+  }
+
+  private runGameLoop(): void {
     // Simulate game state updates
-    const startTime = Date.now()
+    const startTime = this.gameStartTime || Date.now()
     
     this.gameLoopInterval = setInterval(() => {
       if (!this.connected) {
@@ -268,35 +326,70 @@ export class DemoClient {
   }
 }
 
-// Singleton instance
+// Singleton instance - persists across page navigations
 let demoClientInstance: DemoClient | null = null
 let lastRoomId: string | null = null
+
+// Store game state globally to persist across navigations
+let persistedRoom: Room | null = null
+let persistedPlayerId: string | null = null
+let gameStartTime: number | null = null
+let isGameRunning = false
 
 export function getDemoClient(): DemoClient | null {
   return demoClientInstance
 }
 
 export function createDemoClient(options: DemoClientOptions): DemoClient {
-  // If we already have a client for this room, return it instead of creating a new one
-  if (demoClientInstance && lastRoomId === options.roomId && demoClientInstance.isConnected) {
+  // If we already have a client for this room, update handlers and return
+  if (demoClientInstance && lastRoomId === options.roomId) {
+    demoClientInstance.updateHandlers(options.onMessage, options.onConnect, options.onDisconnect)
     return demoClientInstance
   }
   
-  // Clean up existing instance if any
-  if (demoClientInstance) {
+  // Check if we have persisted state for this room (from navigation)
+  const shouldRestoreState = lastRoomId === options.roomId && persistedRoom !== null
+  
+  // Clean up existing instance if switching rooms
+  if (demoClientInstance && lastRoomId !== options.roomId) {
     demoClientInstance.disconnect()
     demoClientInstance = null
+    persistedRoom = null
+    persistedPlayerId = null
+    gameStartTime = null
+    isGameRunning = false
   }
   
   lastRoomId = options.roomId
-  demoClientInstance = new DemoClient(options)
+  
+  // Create new instance, restoring state if available
+  if (shouldRestoreState) {
+    demoClientInstance = new DemoClient(options, persistedRoom, persistedPlayerId)
+  } else {
+    demoClientInstance = new DemoClient(options, null, null)
+  }
+  
   return demoClientInstance
 }
 
 export function destroyDemoClient(): void {
+  // Don't fully destroy - just stop updating, keep state for navigation
+  if (demoClientInstance) {
+    // Save state before "destroying"
+    persistedRoom = demoClientInstance.getRoom()
+    persistedPlayerId = demoClientInstance.playerId
+    demoClientInstance.pause()
+  }
+}
+
+export function fullDestroyDemoClient(): void {
   if (demoClientInstance) {
     demoClientInstance.disconnect()
     demoClientInstance = null
     lastRoomId = null
+    persistedRoom = null
+    persistedPlayerId = null
+    gameStartTime = null
+    isGameRunning = false
   }
 }

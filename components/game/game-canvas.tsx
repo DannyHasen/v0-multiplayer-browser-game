@@ -69,19 +69,59 @@ export function GameCanvas({ gameState, currentPlayerId, theme, onInput }: GameC
       const ctx = ctxRef.current
       const canvas = canvasRef.current
 
-      if (ctx && canvas && gameState) {
-        // Clean up trails for disconnected players
-        cleanupTrails(gameState.players.map(p => p.id))
+      if (ctx && canvas) {
+        const width = dimensionsRef.current.width
+        const height = dimensionsRef.current.height
+        
+        if (gameState && gameState.players.length > 0) {
+          // Clean up trails for disconnected players
+          cleanupTrails(gameState.players.map(p => p.id))
 
-        // Render the game
-        render(
-          ctx,
-          gameState,
-          currentPlayerId,
-          dimensionsRef.current.width,
-          dimensionsRef.current.height,
-          theme
-        )
+          // Render the game
+          render(
+            ctx,
+            gameState,
+            currentPlayerId,
+            width,
+            height,
+            theme
+          )
+        } else {
+          // Show waiting screen when no game state
+          ctx.fillStyle = "#0a0a12"
+          ctx.fillRect(0, 0, width, height)
+          
+          // Draw grid pattern
+          ctx.strokeStyle = "rgba(0, 255, 255, 0.1)"
+          ctx.lineWidth = 1
+          const gridSize = 40
+          for (let x = 0; x < width; x += gridSize) {
+            ctx.beginPath()
+            ctx.moveTo(x, 0)
+            ctx.lineTo(x, height)
+            ctx.stroke()
+          }
+          for (let y = 0; y < height; y += gridSize) {
+            ctx.beginPath()
+            ctx.moveTo(0, y)
+            ctx.lineTo(width, y)
+            ctx.stroke()
+          }
+          
+          // Draw waiting text
+          ctx.fillStyle = "#00ffff"
+          ctx.font = "bold 24px 'Geist Sans', sans-serif"
+          ctx.textAlign = "center"
+          ctx.textBaseline = "middle"
+          ctx.fillText("Starting game...", width / 2, height / 2)
+          
+          // Pulsing effect
+          const pulse = Math.sin(Date.now() / 500) * 0.3 + 0.7
+          ctx.globalAlpha = pulse
+          ctx.fillStyle = "#ff00ff"
+          ctx.fillText("Get ready!", width / 2, height / 2 + 40)
+          ctx.globalAlpha = 1
+        }
       }
 
       animationRef.current = requestAnimationFrame(animate)

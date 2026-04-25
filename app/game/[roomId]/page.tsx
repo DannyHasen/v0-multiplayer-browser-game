@@ -10,7 +10,7 @@ import { CountdownOverlay } from "@/components/game/countdown-overlay"
 import { EndMatchModal } from "@/components/game/end-match-modal"
 import { MobileControls } from "@/components/game/mobile-controls"
 import { useGameStore } from "@/store/game-store"
-import { createDemoClient, destroyDemoClient, getDemoClient } from "@/lib/party/demo-client"
+import { createDemoClient, destroyDemoClient, getDemoClient, fullDestroyDemoClient } from "@/lib/party/demo-client"
 import type { ServerMessage, GameState, InputState } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
@@ -78,6 +78,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
       return
     }
 
+    // Create or get existing client
     const client = createDemoClient({
       roomId,
       onMessage: handleMessage,
@@ -86,7 +87,12 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         const demoClient = getDemoClient()
         if (demoClient) {
           setPlayerId(demoClient.playerId)
-          demoClient.join(settings.nickname, settings.color)
+          // The game should already be running from lobby, but if not, join and start
+          const room = demoClient.getRoom()
+          if (room.players.length === 0) {
+            // Re-join if needed
+            demoClient.join(settings.nickname, settings.color)
+          }
         }
       },
       onDisconnect: () => {
@@ -132,10 +138,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   }, [setShowEndMatch, setGameState, router, roomId])
 
   const handleLeave = useCallback(() => {
-    const client = getDemoClient()
-    if (client) {
-      client.leave()
-    }
+    fullDestroyDemoClient()
     resetAll()
     router.push("/play")
   }, [resetAll, router])

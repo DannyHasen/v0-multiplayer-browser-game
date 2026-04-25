@@ -11,7 +11,7 @@ import { PlayerList } from "@/components/room/player-list"
 import { LobbySettings } from "@/components/room/lobby-settings"
 import { ConnectionBadge } from "@/components/room/connection-badge"
 import { useGameStore, useIsHost, useReadyCountReady, useReadyCountTotal, useCanStartGame } from "@/store/game-store"
-import { createDemoClient, destroyDemoClient, getDemoClient } from "@/lib/party/demo-client"
+import { createDemoClient, destroyDemoClient, getDemoClient, fullDestroyDemoClient } from "@/lib/party/demo-client"
 import type { ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 import Link from "next/link"
@@ -146,10 +146,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   }
 
   const handleLeave = () => {
-    const client = getDemoClient()
-    if (client) {
-      client.leave()
-    }
+    fullDestroyDemoClient()
     resetAll()
     router.push("/play")
   }
