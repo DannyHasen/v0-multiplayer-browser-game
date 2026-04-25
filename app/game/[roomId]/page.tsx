@@ -10,8 +10,8 @@ import { CountdownOverlay } from "@/components/game/countdown-overlay"
 import { EndMatchModal } from "@/components/game/end-match-modal"
 import { MobileControls } from "@/components/game/mobile-controls"
 import { useGameStore } from "@/store/game-store"
-import { createPartyClient, destroyPartyClient, getPartyClient } from "@/lib/party/client"
-import type { ServerMessage, GameState, InputState, PlayerColor } from "@/types/game"
+import { createDemoClient, destroyDemoClient, getDemoClient } from "@/lib/party/demo-client"
+import type { ServerMessage, GameState, InputState } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
 export default function GamePage({ params }: { params: Promise<{ roomId: string }> }) {
@@ -71,27 +71,26 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     }
   }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId])
 
-  // Connect to PartyKit
+  // Connect using demo client
   useEffect(() => {
     if (!settings.nickname) {
       router.push("/play")
       return
     }
 
-    const client = createPartyClient({
+    const client = createDemoClient({
       roomId,
       onMessage: handleMessage,
       onConnect: () => {
         setConnected(true)
-        const partyClient = getPartyClient()
-        if (partyClient) {
-          setPlayerId(partyClient.socketId)
-          partyClient.join(settings.nickname, settings.color)
+        const demoClient = getDemoClient()
+        if (demoClient) {
+          setPlayerId(demoClient.playerId)
+          demoClient.join(settings.nickname, settings.color)
         }
       },
       onDisconnect: () => {
         setConnected(false)
-        toast.error("Disconnected from server")
       },
       onError: () => {
         toast.error("Connection error")
@@ -101,13 +100,13 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     client.connect()
 
     return () => {
-      destroyPartyClient()
+      destroyDemoClient()
     }
   }, [roomId, settings, handleMessage, router, setConnected, setPlayerId])
 
   // Handle input changes
   const handleInput = useCallback((input: InputState) => {
-    const client = getPartyClient()
+    const client = getDemoClient()
     if (client?.isConnected) {
       sequenceNumberRef.current += 1
       client.sendInput(input, sequenceNumberRef.current)
@@ -133,7 +132,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   }, [setShowEndMatch, setGameState, router, roomId])
 
   const handleLeave = useCallback(() => {
-    const client = getPartyClient()
+    const client = getDemoClient()
     if (client) {
       client.leave()
     }

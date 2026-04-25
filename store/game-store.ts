@@ -233,46 +233,43 @@ export const useGameStore = create<GameStore>()(
 )
 
 // Selector hooks for common patterns
-export const useIsHost = () =>
-  useGameStore((state) => {
-    const room = state.room
-    const playerId = state.playerId
-    if (!room || !playerId) return false
-    return room.hostId === playerId
-  })
+// For primitive returns, use regular selectors
+// For object returns, use useShallow as the equality function
+export const useIsHost = () => 
+  useGameStore((state) => state.room?.hostId === state.playerId && state.playerId !== null)
 
 export const useCurrentPlayer = () =>
   useGameStore((state) => {
-    const room = state.room
-    const playerId = state.playerId
-    if (!room || !playerId) return null
-    return room.players.find((p) => p.id === playerId) || null
+    if (!state.room || !state.playerId) return null
+    return state.room.players.find((p) => p.id === state.playerId) || null
   })
 
 export const useOtherPlayers = () =>
-  useGameStore((state) => {
-    const room = state.room
-    const playerId = state.playerId
-    if (!room || !playerId) return []
-    return room.players.filter((p) => p.id !== playerId)
-  })
+  useGameStore(
+    (state) => {
+      if (!state.room || !state.playerId) return []
+      return state.room.players.filter((p) => p.id !== state.playerId)
+    },
+    (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  )
 
+// For object returns, use a custom equality function
 export const useReadyCount = () =>
-  useGameStore((state) => {
-    const room = state.room
-    if (!room) return { ready: 0, total: 0 }
-    return {
-      ready: room.players.filter((p) => p.isReady).length,
-      total: room.players.length,
-    }
-  })
+  useGameStore(
+    (state) => {
+      const players = state.room?.players
+      return {
+        ready: players?.filter((p) => p.isReady).length ?? 0,
+        total: players?.length ?? 0,
+      }
+    },
+    (a, b) => a.ready === b.ready && a.total === b.total
+  )
 
 export const useCanStartGame = () =>
   useGameStore((state) => {
-    const room = state.room
-    const playerId = state.playerId
-    if (!room || !playerId) return false
-    if (room.hostId !== playerId) return false
-    if (room.players.length < 2) return false
-    return room.players.every((p) => p.isReady)
+    if (!state.room || !state.playerId) return false
+    if (state.room.hostId !== state.playerId) return false
+    if (state.room.players.length < 2) return false
+    return state.room.players.every((p) => p.isReady)
   })

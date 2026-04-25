@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback, use } from "react"
+import { useEffect, useState, useCallback, use, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -11,8 +11,8 @@ import { PlayerList } from "@/components/room/player-list"
 import { LobbySettings } from "@/components/room/lobby-settings"
 import { ConnectionBadge } from "@/components/room/connection-badge"
 import { useGameStore, useIsHost, useReadyCount, useCanStartGame } from "@/store/game-store"
-import { createPartyClient, destroyPartyClient, getPartyClient } from "@/lib/party/client"
-import type { ServerMessage, RoomSettings, Room, Player } from "@/types/game"
+import { createDemoClient, destroyDemoClient, getDemoClient } from "@/lib/party/demo-client"
+import type { ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 import Link from "next/link"
 
@@ -66,7 +66,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     }
   }, [setRoom, router, roomId])
 
-  // Connect to PartyKit on mount
+  // Connect using demo client (for testing without PartyKit server)
   useEffect(() => {
     if (!settings.nickname) {
       router.push("/play")
@@ -76,22 +76,21 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     setConnecting(true)
     setConnectionError(null)
 
-    const client = createPartyClient({
+    const client = createDemoClient({
       roomId,
       onMessage: handleMessage,
       onConnect: () => {
         setConnected(true)
         setConnecting(false)
         // Send join message
-        const partyClient = getPartyClient()
-        if (partyClient) {
-          partyClient.join(settings.nickname, settings.color)
-          setPlayerId(partyClient.socketId)
+        const demoClient = getDemoClient()
+        if (demoClient) {
+          demoClient.join(settings.nickname, settings.color)
+          setPlayerId(demoClient.playerId)
         }
       },
       onDisconnect: () => {
         setConnected(false)
-        toast.error("Disconnected from server")
       },
       onError: (error) => {
         setConnectionError(error.message)
@@ -103,7 +102,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     client.connect()
 
     return () => {
-      destroyPartyClient()
+      destroyDemoClient()
     }
   }, [roomId, settings.nickname, settings.color, handleMessage, router, setConnected, setConnecting, setConnectionError, setPlayerId])
 
@@ -119,21 +118,21 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   }
 
   const handleToggleReady = () => {
-    const client = getPartyClient()
+    const client = getDemoClient()
     if (client) {
       client.toggleReady()
     }
   }
 
   const handleStartGame = () => {
-    const client = getPartyClient()
+    const client = getDemoClient()
     if (client && canStart) {
       client.startGame()
     }
   }
 
   const handleLeave = () => {
-    const client = getPartyClient()
+    const client = getDemoClient()
     if (client) {
       client.leave()
     }
@@ -141,16 +140,16 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     router.push("/play")
   }
 
-  const handleSettingsChange = (newSettings: Partial<RoomSettings>) => {
+  const handleSettingsChange = useCallback((newSettings: Partial<RoomSettings>) => {
     updateRoomSettings(newSettings)
     // TODO: Send settings update to server
-  }
+  }, [updateRoomSettings])
 
   const currentPlayer = room?.players.find(p => p.id === playerId)
   const connectionStatus = isConnecting ? "connecting" : isConnected ? "connected" : connectionError ? "error" : "disconnected"
 
-  // Default room state for UI before server responds
-  const displayRoom: Room = room || {
+  // Default room state for UI before server responds - memoized to prevent re-renders
+  const defaultRoom: Room = useMemo(() => ({
     id: roomId,
     code: roomId,
     players: [],
@@ -161,7 +160,9 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
       mapTheme: "cyber",
     },
     hostId: "",
-  }
+  }), [roomId])
+  
+  const displayRoom = room || defaultRoom
 
   return (
     <main className="relative min-h-screen">

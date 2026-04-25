@@ -1,5 +1,6 @@
 "use client"
 
+import { useCallback, useMemo, memo } from "react"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,18 +14,21 @@ interface LobbySettingsProps {
   isHost: boolean
 }
 
-export function LobbySettings({ settings, onSettingsChange, isHost }: LobbySettingsProps) {
-  const handleDurationChange = (value: number[]) => {
+export const LobbySettings = memo(function LobbySettings({ settings, onSettingsChange, isHost }: LobbySettingsProps) {
+  const handleDurationChange = useCallback((value: number[]) => {
     onSettingsChange({ matchDuration: value[0] })
-  }
+  }, [onSettingsChange])
 
-  const handleMaxPlayersChange = (value: string) => {
+  const handleMaxPlayersChange = useCallback((value: string) => {
     onSettingsChange({ maxPlayers: parseInt(value, 10) })
-  }
+  }, [onSettingsChange])
 
-  const handleThemeChange = (value: MapTheme) => {
+  const handleThemeChange = useCallback((value: MapTheme) => {
     onSettingsChange({ mapTheme: value })
-  }
+  }, [onSettingsChange])
+  
+  // Memoize the slider value to prevent re-renders
+  const sliderValue = useMemo(() => [settings.matchDuration], [settings.matchDuration])
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -50,7 +54,7 @@ export function LobbySettings({ settings, onSettingsChange, isHost }: LobbySetti
           </span>
         </div>
         <Slider
-          value={[settings.matchDuration]}
+          value={sliderValue}
           onValueChange={handleDurationChange}
           min={MATCH.MIN_DURATION}
           max={MATCH.MAX_DURATION}
@@ -121,4 +125,4 @@ export function LobbySettings({ settings, onSettingsChange, isHost }: LobbySetti
       </div>
     </div>
   )
-}
+})
