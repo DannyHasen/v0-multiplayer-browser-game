@@ -1,0 +1,429 @@
+import type { Player, Pickup, Hazard, GameState, MapTheme } from "@/types/game"
+import { PLAYER_COLORS } from "@/types/game"
+import { ARENA, PLAYER, PICKUP, MAP_THEMES, VISUAL } from "./constants"
+
+interface RenderContext {
+  ctx: CanvasRenderingContext2D
+  width: number
+  height: number
+  scale: number
+  offsetX: number
+  offsetY: number
+  time: number
+  theme: MapTheme
+}
+
+// Trail history for each player
+const playerTrails: Map<string, { x: number; y: number; opacity: number }[]> = new Map()
+
+export function initRenderer(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return null
+
+  // Enable anti-aliasing
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = "high"
+
+  return ctx
+}
+
+export function resizeCanvas(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
+  const dpr = window.devicePixelRatio || 1
+  const rect = canvas.getBoundingClientRect()
+
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  ctx.scale(dpr, dpr)
+
+  canvas.style.width = `${rect.width}px`
+  canvas.style.height = `${rect.height}px`
+
+  return { width: rect.width, height: rect.height }
+}
+
+export function render(
+  ctx: CanvasRenderingContext2D,
+  gameState: GameState,
+  currentPlayerId: string | null,
+  canvasWidth: number,
+  canvasHeight: number,
+  theme: MapTheme = "cyber"
+) {
+  const time = performance.now()
+
+  // Calculate scale to fit arena in canvas
+  const scaleX = canvasWidth / ARENA.WIDTH
+  const scaleY = canvasHeight / ARENA.HEIGHT
+  const scale = Math.min(scaleX, scaleY) * 0.95
+
+  // Center the arena
+  const offsetX = (canvasWidth - ARENA.WIDTH * scale) / 2
+  const offsetY = (canvasHeight - ARENA.HEIGHT * scale) / 2
+
+  const renderCtx: RenderContext = {
+    ctx,
+    width: canvasWidth,
+    height: canvasHeight,
+    scale,
+    offsetX,
+    offsetY,
+    time,
+    theme,
+  }
+
+  // Clear canvas
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+
+  // Draw layers in order
+  drawBackground(renderCtx)
+  drawGrid(renderCtx)
+  drawHazards(renderCtx, gameState.hazards)
+  drawPickups(renderCtx, gameState.pickups)
+  drawTrails(renderCtx, gameState.players)
+  drawPlayers(renderCtx, gameState.players, currentPlayerId)
+  drawEffects(renderCtx, gameState.players)
+}
+
+function drawBackground(ctx: RenderContext) {
+  const themeConfig = MAP_THEMES[ctx.theme]
+
+  // Background gradient
+  const gradient = ctx.ctx.createRadialGradient(
+    ctx.width / 2,
+    ctx.height / 2,
+    0,
+    ctx.width / 2,
+    ctx.height / 2,
+    Math.max(ctx.width, ctx.height)
+  )
+  gradient.addColorStop(0, themeConfig.gridColor)
+  gradient.addColorStop(1, themeConfig.background)
+
+  ctx.ctx.fillStyle = gradient
+  ctx.ctx.fillRect(0, 0, ctx.width, ctx.height)
+
+  // Arena boundary
+  ctx.ctx.strokeStyle = themeConfig.gridGlow
+  ctx.ctx.lineWidth = 2
+  ctx.ctx.shadowColor = themeConfig.gridGlow
+  ctx.ctx.shadowBlur = 10
+  ctx.ctx.strokeRect(
+    ctx.offsetX,
+    ctx.offsetY,
+    ARENA.WIDTH * ctx.scale,
+    ARENA.HEIGHT * ctx.scale
+  )
+  ctx.ctx.shadowBlur = 0
+}
+
+function drawGrid(ctx: RenderContext) {
+  const themeConfig = MAP_THEMES[ctx.theme]
+  const gridSize = 60 * ctx.scale
+  const pulse = Math.sin(ctx.time * 0.001) * 0.2 + 0.8
+
+  ctx.ctx.strokeStyle = `${themeConfig.gridColor}`
+  ctx.ctx.lineWidth = 1
+
+  // Vertical lines
+  for (let x = ctx.offsetX; x <= ctx.offsetX + ARENA.WIDTH * ctx.scale; x += gridSize) {
+    ctx.ctx.beginPath()
+    ctx.ctx.moveTo(x, ctx.offsetY)
+    ctx.ctx.lineTo(x, ctx.offsetY + ARENA.HEIGHT * ctx.scale)
+    ctx.ctx.globalAlpha = 0.3 * pulse
+    ctx.ctx.stroke()
+  }
+
+  // Horizontal lines
+  for (let y = ctx.offsetY; y <= ctx.offsetY + ARENA.HEIGHT * ctx.scale; y += gridSize) {
+    ctx.ctx.beginPath()
+    ctx.ctx.moveTo(ctx.offsetX, y)
+    ctx.ctx.lineTo(ctx.offsetX + ARENA.WIDTH * ctx.scale, y)
+    ctx.ctx.globalAlpha = 0.3 * pulse
+    ctx.ctx.stroke()
+  }
+
+  ctx.ctx.globalAlpha = 1
+}
+
+function drawHazards(ctx: RenderContext, hazards: Hazard[]) {
+  hazards.forEach((hazard) => {
+    const x = ctx.offsetX + hazard.x * ctx.scale
+    const y = ctx.offsetY + hazard.y * ctx.scale
+    const w = hazard.width * ctx.scale
+    const h = hazard.height * ctx.scale
+
+    // Warning pattern
+    const pulse = Math.sin(ctx.time * 0.003) * 0.3 + 0.7
+
+    ctx.ctx.fillStyle = `rgba(255, 60, 60, ${0.2 * pulse})`
+    ctx.ctx.fillRect(x, y, w, h)
+
+    // Border
+    ctx.ctx.strokeStyle = `rgba(255, 60, 60, ${0.8 * pulse})`
+    ctx.ctx.lineWidth = 2
+    ctx.ctx.shadowColor = "#ff3c3c"
+    ctx.ctx.shadowBlur = 10
+    ctx.ctx.strokeRect(x, y, w, h)
+    ctx.ctx.shadowBlur = 0
+
+    // Diagonal stripes pattern
+    ctx.ctx.save()
+    ctx.ctx.beginPath()
+    ctx.ctx.rect(x, y, w, h)
+    ctx.ctx.clip()
+
+    ctx.ctx.strokeStyle = `rgba(255, 60, 60, ${0.4 * pulse})`
+    ctx.ctx.lineWidth = 2
+    const stripeSpacing = 15 * ctx.scale
+    for (let i = -h; i < w + h; i += stripeSpacing) {
+      ctx.ctx.beginPath()
+      ctx.ctx.moveTo(x + i, y)
+      ctx.ctx.lineTo(x + i + h, y + h)
+      ctx.ctx.stroke()
+    }
+    ctx.ctx.restore()
+  })
+}
+
+function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
+  pickups.forEach((pickup) => {
+    if (pickup.collected) return
+
+    const x = ctx.offsetX + pickup.x * ctx.scale
+    const y = ctx.offsetY + pickup.y * ctx.scale
+    const size = PICKUP.SIZE * ctx.scale
+
+    const pulse = Math.sin(ctx.time * 0.004 + pickup.x * 0.01) * 0.3 + 1
+    const rotation = ctx.time * 0.002
+
+    ctx.ctx.save()
+    ctx.ctx.translate(x, y)
+    ctx.ctx.rotate(rotation)
+
+    // Glow
+    const color = pickup.type === "energy" ? "#00ffff" : "#ffff00"
+    ctx.ctx.shadowColor = color
+    ctx.ctx.shadowBlur = 20 * pulse
+
+    // Inner fill
+    ctx.ctx.beginPath()
+    if (pickup.type === "energy") {
+      // Diamond shape for energy
+      ctx.ctx.moveTo(0, -size * pulse)
+      ctx.ctx.lineTo(size * pulse, 0)
+      ctx.ctx.lineTo(0, size * pulse)
+      ctx.ctx.lineTo(-size * pulse, 0)
+      ctx.ctx.closePath()
+    } else {
+      // Star shape for boost
+      const spikes = 5
+      for (let i = 0; i < spikes * 2; i++) {
+        const radius = i % 2 === 0 ? size * pulse : size * pulse * 0.5
+        const angle = (Math.PI / spikes) * i - Math.PI / 2
+        const px = Math.cos(angle) * radius
+        const py = Math.sin(angle) * radius
+        if (i === 0) ctx.ctx.moveTo(px, py)
+        else ctx.ctx.lineTo(px, py)
+      }
+      ctx.ctx.closePath()
+    }
+
+    ctx.ctx.fillStyle = color
+    ctx.ctx.fill()
+
+    ctx.ctx.restore()
+    ctx.ctx.shadowBlur = 0
+  })
+}
+
+function drawTrails(ctx: RenderContext, players: Player[]) {
+  players.forEach((player) => {
+    let trail = playerTrails.get(player.id)
+    if (!trail) {
+      trail = []
+      playerTrails.set(player.id, trail)
+    }
+
+    // Add current position to trail
+    const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy)
+    if (speed > 0.5) {
+      trail.unshift({ x: player.x, y: player.y, opacity: 1 })
+    }
+
+    // Limit trail length and decay opacity
+    while (trail.length > VISUAL.TRAIL_LENGTH) {
+      trail.pop()
+    }
+
+    // Draw trail
+    const color = PLAYER_COLORS[player.color]
+    trail.forEach((point, i) => {
+      point.opacity *= 0.9
+
+      if (point.opacity < 0.05) return
+
+      const x = ctx.offsetX + point.x * ctx.scale
+      const y = ctx.offsetY + point.y * ctx.scale
+      const size = (PLAYER.SIZE * ctx.scale * (1 - i / trail!.length)) * 0.5
+
+      ctx.ctx.beginPath()
+      ctx.ctx.arc(x, y, size, 0, Math.PI * 2)
+      ctx.ctx.fillStyle = `${color}${Math.floor(point.opacity * 40).toString(16).padStart(2, "0")}`
+      ctx.ctx.fill()
+    })
+  })
+}
+
+function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: string | null) {
+  // Sort so current player is drawn last (on top)
+  const sortedPlayers = [...players].sort((a, b) => {
+    if (a.id === currentPlayerId) return 1
+    if (b.id === currentPlayerId) return -1
+    return 0
+  })
+
+  sortedPlayers.forEach((player) => {
+    const x = ctx.offsetX + player.x * ctx.scale
+    const y = ctx.offsetY + player.y * ctx.scale
+    const size = PLAYER.SIZE * ctx.scale
+    const color = PLAYER_COLORS[player.color]
+    const isCurrentPlayer = player.id === currentPlayerId
+
+    // Direction indicator
+    const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy)
+    const angle = speed > 0.1 ? Math.atan2(player.vy, player.vx) : 0
+
+    ctx.ctx.save()
+    ctx.ctx.translate(x, y)
+    ctx.ctx.rotate(angle)
+
+    // Invulnerability effect
+    if (player.isInvulnerable) {
+      const flash = Math.sin(ctx.time * 0.02) > 0
+      ctx.ctx.globalAlpha = flash ? 1 : 0.5
+    }
+
+    // Outer glow
+    ctx.ctx.shadowColor = color
+    ctx.ctx.shadowBlur = isCurrentPlayer ? 25 : 15
+
+    // Main body (hexagon-ish shape)
+    ctx.ctx.beginPath()
+    const sides = 6
+    for (let i = 0; i < sides; i++) {
+      const a = (Math.PI * 2 * i) / sides - Math.PI / 2
+      const px = Math.cos(a) * size
+      const py = Math.sin(a) * size
+      if (i === 0) ctx.ctx.moveTo(px, py)
+      else ctx.ctx.lineTo(px, py)
+    }
+    ctx.ctx.closePath()
+
+    // Fill with gradient
+    const gradient = ctx.ctx.createRadialGradient(0, 0, 0, 0, 0, size)
+    gradient.addColorStop(0, color)
+    gradient.addColorStop(0.7, color)
+    gradient.addColorStop(1, `${color}80`)
+    ctx.ctx.fillStyle = gradient
+    ctx.ctx.fill()
+
+    // Border
+    ctx.ctx.strokeStyle = "#ffffff"
+    ctx.ctx.lineWidth = 2
+    ctx.ctx.stroke()
+
+    // Direction triangle
+    if (speed > 0.3) {
+      ctx.ctx.beginPath()
+      ctx.ctx.moveTo(size * 1.2, 0)
+      ctx.ctx.lineTo(size * 0.7, -size * 0.3)
+      ctx.ctx.lineTo(size * 0.7, size * 0.3)
+      ctx.ctx.closePath()
+      ctx.ctx.fillStyle = "#ffffff"
+      ctx.ctx.fill()
+    }
+
+    ctx.ctx.restore()
+    ctx.ctx.shadowBlur = 0
+    ctx.ctx.globalAlpha = 1
+
+    // Health bar (only for damaged players)
+    if (player.health < PLAYER.MAX_HEALTH) {
+      const barWidth = size * 2
+      const barHeight = 6
+      const barX = x - barWidth / 2
+      const barY = y - size - 15
+
+      // Background
+      ctx.ctx.fillStyle = "rgba(0, 0, 0, 0.5)"
+      ctx.ctx.fillRect(barX, barY, barWidth, barHeight)
+
+      // Health fill
+      const healthPercent = player.health / PLAYER.MAX_HEALTH
+      const healthColor = healthPercent > 0.5 ? "#00ff00" : healthPercent > 0.25 ? "#ffff00" : "#ff0000"
+      ctx.ctx.fillStyle = healthColor
+      ctx.ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight)
+
+      // Border
+      ctx.ctx.strokeStyle = "#ffffff"
+      ctx.ctx.lineWidth = 1
+      ctx.ctx.strokeRect(barX, barY, barWidth, barHeight)
+    }
+
+    // Nickname
+    ctx.ctx.font = `bold ${12 * Math.min(ctx.scale, 1.2)}px sans-serif`
+    ctx.ctx.textAlign = "center"
+    ctx.ctx.textBaseline = "top"
+    ctx.ctx.fillStyle = "#ffffff"
+    ctx.ctx.shadowColor = "#000000"
+    ctx.ctx.shadowBlur = 4
+    ctx.ctx.fillText(player.nickname, x, y + size + 8)
+    ctx.ctx.shadowBlur = 0
+  })
+}
+
+function drawEffects(ctx: RenderContext, players: Player[]) {
+  // Draw shockwave effects for players who recently used ability
+  players.forEach((player) => {
+    const timeSinceAbility = ctx.time - player.lastAbilityTime
+    if (timeSinceAbility < 500) {
+      const x = ctx.offsetX + player.x * ctx.scale
+      const y = ctx.offsetY + player.y * ctx.scale
+      const progress = timeSinceAbility / 500
+      const radius = progress * PLAYER.ABILITY_RANGE * ctx.scale
+      const opacity = 1 - progress
+
+      ctx.ctx.beginPath()
+      ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
+      ctx.ctx.strokeStyle = `${PLAYER_COLORS[player.color]}${Math.floor(opacity * 255).toString(16).padStart(2, "0")}`
+      ctx.ctx.lineWidth = 3
+      ctx.ctx.stroke()
+    }
+
+    // Dash effect
+    const timeSinceDash = ctx.time - player.lastDashTime
+    if (timeSinceDash < 200) {
+      const x = ctx.offsetX + player.x * ctx.scale
+      const y = ctx.offsetY + player.y * ctx.scale
+      const progress = timeSinceDash / 200
+      const size = PLAYER.SIZE * ctx.scale * (1 + progress * 0.5)
+      const opacity = 1 - progress
+
+      ctx.ctx.beginPath()
+      ctx.ctx.arc(x, y, size, 0, Math.PI * 2)
+      ctx.ctx.fillStyle = `${PLAYER_COLORS[player.color]}${Math.floor(opacity * 100).toString(16).padStart(2, "0")}`
+      ctx.ctx.fill()
+    }
+  })
+}
+
+// Cleanup trails for disconnected players
+export function cleanupTrails(activePlayerIds: string[]) {
+  const toDelete: string[] = []
+  playerTrails.forEach((_, id) => {
+    if (!activePlayerIds.includes(id)) {
+      toDelete.push(id)
+    }
+  })
+  toDelete.forEach((id) => playerTrails.delete(id))
+}

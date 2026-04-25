@@ -1,0 +1,302 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Neon Drift Arena - Cyber Arcade Theme */
+:root {
+  /* Core palette - Dark base with neon accents */
+  --background: oklch(0.08 0.02 270);
+  --foreground: oklch(0.95 0.01 270);
+  
+  /* Card surfaces */
+  --card: oklch(0.12 0.02 270);
+  --card-foreground: oklch(0.95 0.01 270);
+  
+  /* Popover/dropdown surfaces */
+  --popover: oklch(0.10 0.02 270);
+  --popover-foreground: oklch(0.95 0.01 270);
+  
+  /* Primary - Neon Cyan */
+  --primary: oklch(0.85 0.18 195);
+  --primary-foreground: oklch(0.15 0.02 270);
+  
+  /* Secondary - Deep purple surface */
+  --secondary: oklch(0.20 0.04 280);
+  --secondary-foreground: oklch(0.90 0.01 270);
+  
+  /* Muted elements */
+  --muted: oklch(0.18 0.03 270);
+  --muted-foreground: oklch(0.65 0.02 270);
+  
+  /* Accent - Neon Magenta */
+  --accent: oklch(0.70 0.25 330);
+  --accent-foreground: oklch(0.15 0.02 270);
+  
+  /* Destructive - Neon Red */
+  --destructive: oklch(0.60 0.25 25);
+  --destructive-foreground: oklch(0.95 0.01 270);
+  
+  /* Borders and inputs */
+  --border: oklch(0.25 0.04 280);
+  --input: oklch(0.15 0.03 270);
+  --ring: oklch(0.75 0.18 195);
+  
+  /* Chart colors - Neon spectrum */
+  --chart-1: oklch(0.85 0.18 195); /* Cyan */
+  --chart-2: oklch(0.70 0.25 330); /* Magenta */
+  --chart-3: oklch(0.85 0.20 85);  /* Yellow */
+  --chart-4: oklch(0.80 0.22 145); /* Lime */
+  --chart-5: oklch(0.75 0.20 280); /* Purple */
+  
+  --radius: 0.75rem;
+  
+  /* Neon glow colors */
+  --neon-cyan: oklch(0.85 0.18 195);
+  --neon-magenta: oklch(0.70 0.25 330);
+  --neon-yellow: oklch(0.90 0.20 95);
+  --neon-lime: oklch(0.85 0.22 145);
+  --neon-purple: oklch(0.65 0.25 300);
+  --neon-teal: oklch(0.80 0.15 175);
+  --neon-orange: oklch(0.80 0.20 50);
+  --neon-pink: oklch(0.75 0.20 350);
+  
+  /* Grid and arena */
+  --arena-bg: oklch(0.06 0.02 270);
+  --grid-line: oklch(0.15 0.05 280);
+  --grid-glow: oklch(0.50 0.15 195);
+}
+
+/* Dark mode is default and only mode for this game */
+.dark {
+  --background: oklch(0.08 0.02 270);
+  --foreground: oklch(0.95 0.01 270);
+  --card: oklch(0.12 0.02 270);
+  --card-foreground: oklch(0.95 0.01 270);
+  --popover: oklch(0.10 0.02 270);
+  --popover-foreground: oklch(0.95 0.01 270);
+  --primary: oklch(0.85 0.18 195);
+  --primary-foreground: oklch(0.15 0.02 270);
+  --secondary: oklch(0.20 0.04 280);
+  --secondary-foreground: oklch(0.90 0.01 270);
+  --muted: oklch(0.18 0.03 270);
+  --muted-foreground: oklch(0.65 0.02 270);
+  --accent: oklch(0.70 0.25 330);
+  --accent-foreground: oklch(0.15 0.02 270);
+  --destructive: oklch(0.60 0.25 25);
+  --destructive-foreground: oklch(0.95 0.01 270);
+  --border: oklch(0.25 0.04 280);
+  --input: oklch(0.15 0.03 270);
+  --ring: oklch(0.75 0.18 195);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  
+  /* Custom neon colors */
+  --color-neon-cyan: var(--neon-cyan);
+  --color-neon-magenta: var(--neon-magenta);
+  --color-neon-yellow: var(--neon-yellow);
+  --color-neon-lime: var(--neon-lime);
+  --color-neon-purple: var(--neon-purple);
+  --color-neon-teal: var(--neon-teal);
+  --color-neon-orange: var(--neon-orange);
+  --color-neon-pink: var(--neon-pink);
+  --color-arena-bg: var(--arena-bg);
+  --color-grid-line: var(--grid-line);
+  --color-grid-glow: var(--grid-glow);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Neon glow utilities */
+@layer utilities {
+  .neon-glow-cyan {
+    box-shadow: 
+      0 0 5px oklch(0.85 0.18 195 / 0.5),
+      0 0 10px oklch(0.85 0.18 195 / 0.3),
+      0 0 20px oklch(0.85 0.18 195 / 0.2);
+  }
+  
+  .neon-glow-magenta {
+    box-shadow: 
+      0 0 5px oklch(0.70 0.25 330 / 0.5),
+      0 0 10px oklch(0.70 0.25 330 / 0.3),
+      0 0 20px oklch(0.70 0.25 330 / 0.2);
+  }
+  
+  .neon-text-cyan {
+    text-shadow: 
+      0 0 5px oklch(0.85 0.18 195 / 0.8),
+      0 0 10px oklch(0.85 0.18 195 / 0.5),
+      0 0 20px oklch(0.85 0.18 195 / 0.3);
+  }
+  
+  .neon-text-magenta {
+    text-shadow: 
+      0 0 5px oklch(0.70 0.25 330 / 0.8),
+      0 0 10px oklch(0.70 0.25 330 / 0.5),
+      0 0 20px oklch(0.70 0.25 330 / 0.3);
+  }
+  
+  .neon-border {
+    border-color: oklch(0.85 0.18 195 / 0.5);
+    box-shadow: 
+      inset 0 0 10px oklch(0.85 0.18 195 / 0.1),
+      0 0 10px oklch(0.85 0.18 195 / 0.2);
+  }
+  
+  /* Animated gradient background */
+  .gradient-animate {
+    background-size: 400% 400%;
+    animation: gradient-shift 15s ease infinite;
+  }
+  
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  
+  /* Pulse animation for pickups */
+  .pulse-neon {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% { 
+      opacity: 0.8;
+      transform: scale(1);
+    }
+    50% { 
+      opacity: 1;
+      transform: scale(1.05);
+    }
+  }
+  
+  /* Scan line effect */
+  .scanlines::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      oklch(0 0 0 / 0.03) 2px,
+      oklch(0 0 0 / 0.03) 4px
+    );
+    pointer-events: none;
+  }
+  
+  /* Grid background pattern */
+  .grid-pattern {
+    background-image: 
+      linear-gradient(oklch(0.15 0.05 280 / 0.5) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(0.15 0.05 280 / 0.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  
+  /* CRT flicker effect (subtle) */
+  .crt-flicker {
+    animation: flicker 0.15s infinite;
+  }
+  
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.98; }
+  }
+  
+  /* Dash trail effect */
+  .trail-effect {
+    animation: trail-fade 0.3s ease-out forwards;
+  }
+  
+  @keyframes trail-fade {
+    from { 
+      opacity: 0.6;
+      transform: scale(1);
+    }
+    to { 
+      opacity: 0;
+      transform: scale(0.8);
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: oklch(0.10 0.02 270);
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.30 0.05 280);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.40 0.08 280);
+}
+
+/* Selection color */
+::selection {
+  background: oklch(0.85 0.18 195 / 0.3);
+  color: oklch(0.95 0.01 270);
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid oklch(0.85 0.18 195);
+  outline-offset: 2px;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
