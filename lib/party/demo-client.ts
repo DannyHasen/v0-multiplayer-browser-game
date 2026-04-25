@@ -492,24 +492,44 @@ export class DemoClient {
   }
   
   // AI state tracking (persistent per bot)
-  private aiTargets: Map<string, { x: number; y: number; changeAt: number }> = new Map()
+  private aiTargets: Map<string, { x: number; y: number; changeAt: number; mode: "wander" | "chase" | "flee" }> = new Map()
   
-  // Smarter AI for bots
+  // Different AI personalities - each bot behaves differently
   private getAIInput(playerId: string, index: number, now: number): InputState {
     const state = this.playerStates.get(playerId)
     if (!state) return { up: false, down: false, left: false, right: false, dash: false, ability: false }
     
     const humanState = this.playerStates.get(this._playerId)
     
-    // Get or create AI target
+    // Each bot has different aggression based on index
+    // Bot 0: Aggressive chaser, Bot 1: Wanderer/collector, Bot 2: Cautious/flanker
+    const personality = index % 3
+    
+    // Get or create AI target with mode
     let aiTarget = this.aiTargets.get(playerId)
     if (!aiTarget || now > aiTarget.changeAt) {
-      // Pick a new random target every 2-4 seconds
-      aiTarget = {
-        x: Math.random() * (ARENA_WIDTH - 200) + 100,
-        y: Math.random() * (ARENA_HEIGHT - 200) + 100,
-        changeAt: now + 2000 + Math.random() * 2000,
+      // Different target selection based on personality
+      let mode: "wander" | "chase" | "flee" = "wander"
+      let newX = Math.random() * (ARENA_WIDTH - 200) + 100
+      let newY = Math.random() * (ARENA_HEIGHT - 200) + 100
+      let duration = 3000 + Math.random() * 2000
+      
+      if (personality === 0) {
+        // Aggressive: mostly chase, sometimes wander
+        mode = Math.random() < 0.7 ? "chase" : "wander"
+        duration = 2000 + Math.random() * 1000
+      } else if (personality === 1) {
+        // Collector: mostly wander to pickups, rarely chase
+        mode = Math.random() < 0.2 ? "chase" : "wander"
+        duration = 4000 + Math.random() * 2000
+      } else {
+        // Cautious: mix of everything, sometimes runs away
+        const roll = Math.random()
+        mode = roll < 0.3 ? "chase" : roll < 0.5 ? "flee" : "wander"
+        duration = 2500 + Math.random() * 1500
       }
+      
+      aiTarget = { x: newX, y: newY, changeAt: now + duration, mode }
       this.aiTargets.set(playerId, aiTarget)
     }
     
@@ -518,38 +538,58 @@ export class DemoClient {
     let shouldDash = false
     let shouldAbility = false
     
-    // Chase human player if they're nearby
     if (humanState) {
       const distToHuman = Math.sqrt(
         Math.pow(humanState.x - state.x, 2) +
         Math.pow(humanState.y - state.y, 2)
       )
       
-      // Chase if human is within range
-      if (distToHuman < 300) {
-        targetX = humanState.x
-        targetY = humanState.y
+      if (aiTarget.mode === "chase" && distToHuman < 400) {
+        // Chase but with offset so bots don't stack on same spot
+        const offsetAngle = (index * Math.PI * 2 / 3) + now / 2000
+        const offsetDist = 40
+        targetX = humanState.x + Math.cos(offsetAngle) * offsetDist
+        targetY = humanState.y + Math.sin(offsetAngle) * offsetDist
         
-        // Dash to catch up if medium distance
-        if (distToHuman > 100 && distToHuman < 200 && now - state.lastDashTime > DASH_COOLDOWN) {
+        // Dash occasionally when chasing
+        if (distToHuman > 150 && distToHuman < 250 && Math.random() < 0.02 && now - state.lastDashTime > DASH_COOLDOWN) {
           shouldDash = true
         }
+      } else if (aiTarget.mode === "flee" && distToHuman < 200) {
+        // Run away from player
+        const angle = Math.atan2(state.y - humanState.y, state.x - humanState.x)
+        targetX = state.x + Math.cos(angle) * 150
+        targetY = state.y + Math.sin(angle) * 150
         
-        // Use ability when very close
-        if (distToHuman < 90 && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
+        // Dash to escape
+        if (distToHuman < 100 && now - state.lastDashTime > DASH_COOLDOWN) {
+          shouldDash = true
+        }
+      }
+      // else: keep wandering to random target
+      
+      // Use ability when very close, but not all at once
+      if (distToHuman < 80 && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
+        // Stagger ability usage by bot index
+        if (Math.random() < 0.5) {
           shouldAbility = true
         }
       }
     }
     
+    // Clamp target to arena
+    targetX = Math.max(50, Math.min(ARENA_WIDTH - 50, targetX))
+    targetY = Math.max(50, Math.min(ARENA_HEIGHT - 50, targetY))
+    
     const dx = targetX - state.x
     const dy = targetY - state.y
+    const deadzone = 20
     
     return {
-      up: dy < -15,
-      down: dy > 15,
-      left: dx < -15,
-      right: dx > 15,
+      up: dy < -deadzone,
+      down: dy > deadzone,
+      left: dx < -deadzone,
+      right: dx > deadzone,
       dash: shouldDash,
       ability: shouldAbility,
     }
