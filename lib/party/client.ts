@@ -1,5 +1,5 @@
 import PartySocket from "partysocket"
-import type { ClientMessage, ServerMessage, PlayerColor, InputState } from "@/types/game"
+import type { ClientMessage, ServerMessage, PlayerColor, InputState, Room, RoomSettings } from "@/types/game"
 
 // PartyKit host - use environment variable or default to localhost in development
 export const PARTYKIT_HOST =
@@ -25,6 +25,7 @@ export class PartyClient {
   private errorHandler?: ErrorHandler
   private roomId: string
   private reconnecting = false
+  private room: Room | null = null
 
   constructor(options: PartyClientOptions) {
     this.roomId = options.roomId
@@ -34,8 +35,30 @@ export class PartyClient {
     this.errorHandler = options.onError
   }
 
+  updateHandlers(
+    onMessage: MessageHandler,
+    onConnect?: ConnectionHandler,
+    onDisconnect?: ConnectionHandler,
+    onError?: ErrorHandler
+  ): void {
+    this.messageHandler = onMessage
+    this.connectHandler = onConnect
+    this.disconnectHandler = onDisconnect
+    this.errorHandler = onError
+
+    if (this.isConnected) {
+      this.connectHandler?.()
+      if (this.room) {
+        this.messageHandler({ type: "room_state", room: this.room })
+      }
+    }
+  }
+
   connect(): void {
     if (this.socket) {
+      if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING) {
+        return
+      }
       this.socket.close()
     }
 
@@ -54,6 +77,9 @@ export class PartyClient {
       this.socket.addEventListener("message", (event) => {
         try {
           const message = JSON.parse(event.data) as ServerMessage
+          if (message.type === "room_state") {
+            this.room = message.room
+          }
           this.messageHandler(message)
         } catch (e) {
           console.error("Failed to parse message:", e)
@@ -98,6 +124,18 @@ export class PartyClient {
     this.send({ type: "start" })
   }
 
+  updateSettings(settings: Partial<RoomSettings>): void {
+    this.send({ type: "settings", settings })
+  }
+
+  fillWithBots(): number {
+    return 0
+  }
+
+  resetToLobby(): void {
+    this.send({ type: "reset" })
+  }
+
   sendInput(input: InputState, sequenceNumber: number): void {
     this.send({ type: "input", input, sequenceNumber })
   }
@@ -113,26 +151,59 @@ export class PartyClient {
   get socketId(): string | null {
     return this.socket?.id || null
   }
+
+  get playerId(): string | null {
+    return this.socketId
+  }
+
+  getRoom(): Room {
+    return this.room ?? {
+      id: this.roomId,
+      code: this.roomId,
+      players: [],
+      state: "lobby",
+      settings: {
+        maxPlayers: 8,
+        matchDuration: 180,
+        mapTheme: "cyber",
+      },
+      hostId: "",
+    }
+  }
 }
 
 // Singleton instance for the current session
 let clientInstance: PartyClient | null = null
+let lastRoomId: string | null = null
 
 export function getPartyClient(): PartyClient | null {
   return clientInstance
 }
 
 export function createPartyClient(options: PartyClientOptions): PartyClient {
-  if (clientInstance) {
+  if (clientInstance && lastRoomId === options.roomId) {
+    clientInstance.updateHandlers(options.onMessage, options.onConnect, options.onDisconnect, options.onError)
+    return clientInstance
+  }
+
+  if (clientInstance && lastRoomId !== options.roomId) {
     clientInstance.disconnect()
   }
+  lastRoomId = options.roomId
   clientInstance = new PartyClient(options)
   return clientInstance
 }
 
 export function destroyPartyClient(): void {
   if (clientInstance) {
+    clientInstance.updateHandlers(() => {})
+  }
+}
+
+export function fullDestroyPartyClient(): void {
+  if (clientInstance) {
     clientInstance.disconnect()
     clientInstance = null
+    lastRoomId = null
   }
 }

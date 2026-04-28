@@ -12,6 +12,7 @@ import type {
   BossState,
   MeleeEnemy,
   BombState,
+  StormState,
 } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
@@ -83,6 +84,11 @@ const MELEE_SPAWN_RATIOS = [0.55, 0.75, 0.9]
 const ROUND_DAMAGE_SCALE = 0.45
 const ROUND_REWARD_SCALE = 1.25
 const ROUND_SPEED_SCALE = 0.14
+const STORM_START_PROGRESS = 0.42
+const STORM_END_PROGRESS = 0.96
+const STORM_FINAL_RADIUS = 245
+const STORM_DAMAGE = 6
+const STORM_HIT_COOLDOWN = 1000
 
 const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
   { nickname: "NeonBot", color: "magenta" },
@@ -183,6 +189,7 @@ type DemoPlayerState = {
   lastBurnTick: number
   burnOwnerId: string | null
   lastHazardHitTime: number
+  lastStormHitTime: number
   respawnInvulnerableUntil: number
   respawnAt: number | null
 }
@@ -535,6 +542,7 @@ export class DemoClient {
         lastBurnTick: 0,
         burnOwnerId: null,
         lastHazardHitTime: 0,
+        lastStormHitTime: 0,
         respawnInvulnerableUntil: Date.now() + RESPAWN_INVULNERABILITY,
         respawnAt: null,
       })
@@ -556,6 +564,7 @@ export class DemoClient {
       const now = Date.now()
       const elapsed = (now - startTime) / 1000
       const timeRemaining = Math.max(0, this.room.settings.matchDuration - elapsed)
+      const storm = this.getStormState(now)
 
       this.updateHazards()
       this.updateBoss(now)
@@ -634,6 +643,7 @@ export class DemoClient {
         state.y = clamp(state.y, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
 
         this.applyHazardCollisions(player.id, state, now)
+        this.applyStormPressure(player.id, state, now, storm)
         
         // Handle ability (shockwave)
         if (input.ability && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
@@ -781,6 +791,7 @@ export class DemoClient {
         boss: this.boss ? { ...this.boss } : null,
         meleeEnemies: this.meleeEnemies.map(enemy => ({ ...enemy })),
         bombs: this.bombs.map(bomb => ({ ...bomb })),
+        storm,
         timeRemaining,
         matchState: "playing",
       }
@@ -824,6 +835,28 @@ export class DemoClient {
 
   private scaleSpeed(base: number, now: number): number {
     return base * (1 + this.getRoundProgress(now) * ROUND_SPEED_SCALE)
+  }
+
+  private getStormState(now: number): StormState | null {
+    const progress = this.getRoundProgress(now)
+    if (progress < STORM_START_PROGRESS) return null
+
+    const shrinkProgress = clamp(
+      (progress - STORM_START_PROGRESS) / (STORM_END_PROGRESS - STORM_START_PROGRESS),
+      0,
+      1
+    )
+    const maxRadius = Math.hypot(ARENA_WIDTH, ARENA_HEIGHT) / 2 + PLAYER_RADIUS
+    const easedProgress = shrinkProgress * shrinkProgress * (3 - 2 * shrinkProgress)
+
+    return {
+      x: ARENA_WIDTH / 2,
+      y: ARENA_HEIGHT / 2,
+      radius: maxRadius - (maxRadius - STORM_FINAL_RADIUS) * easedProgress,
+      maxRadius,
+      damage: this.scaleDamage(STORM_DAMAGE, now),
+      active: true,
+    }
   }
 
   private addScore(state: DemoPlayerState | undefined, base: number, now: number): number {
@@ -1270,6 +1303,32 @@ export class DemoClient {
     this.damagePlayer(playerId, state, HAZARD_DAMAGE, now, "hazard")
   }
 
+  private applyStormPressure(playerId: string, state: DemoPlayerState, now: number, storm: StormState | null): void {
+    if (
+      !storm ||
+      !storm.active ||
+      state.respawnAt ||
+      now < state.respawnInvulnerableUntil ||
+      now < state.shieldUntil ||
+      now - state.lastStormHitTime < STORM_HIT_COOLDOWN
+    ) {
+      return
+    }
+
+    const dx = state.x - storm.x
+    const dy = state.y - storm.y
+    const dist = Math.hypot(dx, dy)
+    if (dist <= storm.radius - PLAYER_RADIUS * 0.4) return
+
+    state.lastStormHitTime = now
+    const angle = Math.atan2(storm.y - state.y, storm.x - state.x)
+    state.vx = Math.cos(angle) * 6
+    state.vy = Math.sin(angle) * 6
+    state.x = clamp(state.x + Math.cos(angle) * 18, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+    state.y = clamp(state.y + Math.sin(angle) * 18, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
+    this.damagePlayer(playerId, state, STORM_DAMAGE, now, "storm")
+  }
+
   private damagePlayer(playerId: string, state: DemoPlayerState, damage: number, now: number, attackerId: string): DamageResult {
     if (state.respawnAt || now < state.shieldUntil || now < state.respawnInvulnerableUntil) {
       return { damaged: false, eliminated: false, amount: 0 }
@@ -1303,6 +1362,7 @@ export class DemoClient {
     state.freezeUntil = 0
     state.burnUntil = 0
     state.burnOwnerId = null
+    state.lastStormHitTime = 0
     state.respawnAt = now + RESPAWN_DELAY
     state.respawnInvulnerableUntil = 0
     state.score = Math.max(0, state.score - DEATH_SCORE_PENALTY)
@@ -1321,6 +1381,7 @@ export class DemoClient {
     state.freezeUntil = 0
     state.burnUntil = 0
     state.burnOwnerId = null
+    state.lastStormHitTime = 0
     state.respawnAt = null
     state.respawnInvulnerableUntil = now + RESPAWN_INVULNERABILITY
   }
@@ -1381,7 +1442,7 @@ export class DemoClient {
       )
   }
 
-  private getAIDangerTarget(state: DemoPlayerState): { x: number; y: number; urgency: number } | null {
+  private getAIDangerTarget(state: DemoPlayerState, now: number): { x: number; y: number; urgency: number } | null {
     let fleeX = 0
     let fleeY = 0
     let urgency = 0
@@ -1427,6 +1488,21 @@ export class DemoClient {
         0.8
       )
     })
+
+    const storm = this.getStormState(now)
+    if (storm) {
+      const stormDx = state.x - storm.x
+      const stormDy = state.y - storm.y
+      const stormDistance = Math.max(1, Math.hypot(stormDx, stormDy))
+      if (stormDistance > storm.radius - 120) {
+        addDanger(
+          storm.x + (stormDx / stormDistance) * storm.radius,
+          storm.y + (stormDy / stormDistance) * storm.radius,
+          210,
+          1.5
+        )
+      }
+    }
 
     const fleeLength = Math.hypot(fleeX, fleeY)
     if (fleeLength < 0.05) return null
@@ -1594,7 +1670,7 @@ export class DemoClient {
     const state = this.playerStates.get(playerId)
     if (!state) return this.getEmptyInput()
 
-    const dangerTarget = this.getAIDangerTarget(state)
+    const dangerTarget = this.getAIDangerTarget(state, now)
     let aiTarget = this.aiTargets.get(playerId)
     const targetReached = aiTarget ? Math.hypot(aiTarget.x - state.x, aiTarget.y - state.y) < 34 : false
     const pickupUnavailable = Boolean(

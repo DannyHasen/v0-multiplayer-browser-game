@@ -1,4 +1,4 @@
-import type { Player, Pickup, Hazard, Projectile, BossState, MeleeEnemy, BombState, GameState, MapTheme } from "@/types/game"
+import type { Player, Pickup, Hazard, Projectile, BossState, MeleeEnemy, BombState, StormState, GameState, MapTheme } from "@/types/game"
 import { PLAYER_COLORS } from "@/types/game"
 import { ARENA, PLAYER, PICKUP, MAP_THEMES, VISUAL } from "./constants"
 
@@ -77,6 +77,7 @@ export function render(
   // Draw layers in order
   drawBackground(renderCtx)
   drawGrid(renderCtx)
+  drawStorm(renderCtx, gameState.storm ?? null)
   drawHazards(renderCtx, gameState.hazards)
   drawBombs(renderCtx, gameState.bombs ?? [])
   drawPickups(renderCtx, gameState.pickups)
@@ -147,6 +148,42 @@ function drawGrid(ctx: RenderContext) {
   }
 
   ctx.ctx.globalAlpha = 1
+}
+
+function drawStorm(ctx: RenderContext, storm: StormState | null) {
+  if (!storm?.active) return
+
+  const x = ctx.offsetX + storm.x * ctx.scale
+  const y = ctx.offsetY + storm.y * ctx.scale
+  const radius = storm.radius * ctx.scale
+  const arenaX = ctx.offsetX
+  const arenaY = ctx.offsetY
+  const arenaW = ARENA.WIDTH * ctx.scale
+  const arenaH = ARENA.HEIGHT * ctx.scale
+  const pulse = Math.sin(ctx.time * 0.004) * 0.18 + 0.82
+
+  ctx.ctx.save()
+  ctx.ctx.beginPath()
+  ctx.ctx.rect(arenaX, arenaY, arenaW, arenaH)
+  ctx.ctx.arc(x, y, radius, 0, Math.PI * 2, true)
+  ctx.ctx.fillStyle = `rgba(255, 42, 110, ${0.12 * pulse})`
+  ctx.ctx.fill("evenodd")
+
+  ctx.ctx.beginPath()
+  ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.ctx.strokeStyle = `rgba(255, 70, 130, ${0.75 * pulse})`
+  ctx.ctx.lineWidth = 3
+  ctx.ctx.shadowColor = "#ff3c78"
+  ctx.ctx.shadowBlur = 18
+  ctx.ctx.stroke()
+
+  ctx.ctx.beginPath()
+  ctx.ctx.arc(x, y, Math.max(0, radius - 8 * ctx.scale), 0, Math.PI * 2)
+  ctx.ctx.strokeStyle = `rgba(255, 255, 255, ${0.22 * pulse})`
+  ctx.ctx.lineWidth = 1
+  ctx.ctx.stroke()
+  ctx.ctx.restore()
+  ctx.ctx.shadowBlur = 0
 }
 
 function drawHazards(ctx: RenderContext, hazards: Hazard[]) {

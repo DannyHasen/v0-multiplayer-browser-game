@@ -11,7 +11,14 @@ import { PlayerList } from "@/components/room/player-list"
 import { LobbySettings } from "@/components/room/lobby-settings"
 import { ConnectionBadge } from "@/components/room/connection-badge"
 import { useGameStore, useIsHost, useReadyCountReady, useReadyCountTotal, useCanStartGame } from "@/store/game-store"
-import { createDemoClient, destroyDemoClient, getDemoClient, fullDestroyDemoClient } from "@/lib/party/demo-client"
+import {
+  createGameClient,
+  destroyGameClient,
+  fullDestroyGameClient,
+  getGameClient,
+  getGameClientPlayerId,
+  isRealtimeMultiplayer,
+} from "@/lib/party/session-client"
 import type { ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 import Link from "next/link"
@@ -49,7 +56,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   setRoomRef.current = setRoom
   routerRef.current = router
 
-  // Connect using demo client (for testing without PartyKit server)
+  // Connect using the selected backend: local demo or PartyKit realtime.
   // Only run once on mount
   useEffect(() => {
     // Prevent double connection in strict mode
@@ -88,17 +95,17 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
       }
     }
 
-    const client = createDemoClient({
+    const client = createGameClient({
       roomId,
       onMessage: handleMessage,
       onConnect: () => {
         setConnected(true)
         setConnecting(false)
         // Send join message
-        const demoClient = getDemoClient()
-        if (demoClient) {
-          demoClient.join(settings.nickname, settings.color)
-          setPlayerId(demoClient.playerId)
+        const activeClient = getGameClient()
+        if (activeClient) {
+          activeClient.join(settings.nickname, settings.color)
+          setPlayerId(getGameClientPlayerId(activeClient))
         }
       },
       onDisconnect: () => {
@@ -114,7 +121,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     client.connect()
 
     return () => {
-      destroyDemoClient()
+      destroyGameClient()
       hasConnectedRef.current = false
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,21 +139,21 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   }
 
   const handleToggleReady = () => {
-    const client = getDemoClient()
+    const client = getGameClient()
     if (client) {
       client.toggleReady()
     }
   }
 
   const handleStartGame = () => {
-    const client = getDemoClient()
+    const client = getGameClient()
     if (client && canStart) {
       client.startGame()
     }
   }
 
   const handleFillWithBots = () => {
-    const client = getDemoClient()
+    const client = getGameClient()
     if (!client || !isHost) return
 
     const added = client.fillWithBots()
@@ -158,15 +165,15 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   }
 
   const handleLeave = () => {
-    fullDestroyDemoClient()
+    fullDestroyGameClient()
     resetAll()
     router.push("/play")
   }
 
   const handleSettingsChange = useCallback((newSettings: Partial<RoomSettings>) => {
     updateRoomSettings(newSettings)
-    // Sync settings to demo client
-    const client = getDemoClient()
+    // Sync settings to the active game backend.
+    const client = getGameClient()
     if (client) {
       client.updateSettings(newSettings)
     }
@@ -253,7 +260,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
               maxPlayers={displayRoom.settings.maxPlayers}
             />
 
-            {isHost && displayRoom.state === "lobby" && (
+            {isHost && displayRoom.state === "lobby" && !isRealtimeMultiplayer && (
               <Button
                 variant="outline"
                 onClick={handleFillWithBots}

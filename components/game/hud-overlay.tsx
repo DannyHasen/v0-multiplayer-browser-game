@@ -1,7 +1,7 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Timer, Zap, Radio, Copy, Check, Skull } from "lucide-react"
+import { Timer, Zap, Radio, Copy, Check, Skull, AlertTriangle } from "lucide-react"
 import { useState } from "react"
 import { Progress } from "@/components/ui/progress"
 import { formatTime, PLAYER } from "@/lib/game/constants"
@@ -11,9 +11,16 @@ interface HUDOverlayProps {
   gameState: GameState
   currentPlayer: Player | null
   roomCode: string
+  combatNotices?: CombatNotice[]
 }
 
-export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayProps) {
+export interface CombatNotice {
+  id: string
+  message: string
+  tone: "danger" | "warning"
+}
+
+export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices = [] }: HUDOverlayProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopyCode = async () => {
@@ -33,44 +40,65 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
     <div className="absolute inset-0 pointer-events-none">
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 p-4 flex items-start justify-between">
-        {/* Player stats */}
-        {currentPlayer && (
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="bg-card/80 backdrop-blur-sm rounded-lg p-3 border border-border pointer-events-auto"
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm"
-                style={{
-                  backgroundColor: `${PLAYER_COLORS[currentPlayer.color]}20`,
-                  border: `2px solid ${PLAYER_COLORS[currentPlayer.color]}`,
-                }}
-              >
-                {currentPlayer.nickname.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div className="font-semibold text-sm">{currentPlayer.nickname}</div>
-                <div className="text-primary font-mono text-lg font-bold">
-                  {Math.round(currentPlayer.score)}
+        <div className="flex max-w-[260px] flex-col gap-2">
+          {/* Player stats */}
+          {currentPlayer && (
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="bg-card/80 backdrop-blur-sm rounded-lg p-3 border border-border pointer-events-auto"
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <div
+                  className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm"
+                  style={{
+                    backgroundColor: `${PLAYER_COLORS[currentPlayer.color]}20`,
+                    border: `2px solid ${PLAYER_COLORS[currentPlayer.color]}`,
+                  }}
+                >
+                  {currentPlayer.nickname.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-semibold text-sm">{currentPlayer.nickname}</div>
+                  <div className="text-primary font-mono text-lg font-bold">
+                    {Math.round(currentPlayer.score)}
+                  </div>
                 </div>
               </div>
-            </div>
-            
-            {/* Health bar */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Health</span>
-                <span>{currentPlayer.health}/{currentMaxHealth}</span>
+
+              {/* Health bar */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Health</span>
+                  <span>{currentPlayer.health}/{currentMaxHealth}</span>
+                </div>
+                <Progress 
+                  value={(currentPlayer.health / currentMaxHealth) * 100} 
+                  className="h-2"
+                />
               </div>
-              <Progress 
-                value={(currentPlayer.health / currentMaxHealth) * 100} 
-                className="h-2"
-              />
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
+
+          <AnimatePresence initial={false}>
+            {combatNotices.slice(0, 2).map((notice) => (
+              <motion.div
+                key={notice.id}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs backdrop-blur-sm ${
+                  notice.tone === "danger"
+                    ? "border-destructive/45 bg-destructive/12 text-destructive-foreground"
+                    : "border-orange-400/40 bg-orange-400/10 text-orange-100"
+                }`}
+              >
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{notice.message}</span>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
 
         {/* Timer */}
         <motion.div

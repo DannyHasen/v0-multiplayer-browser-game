@@ -189,11 +189,17 @@ export default class GameServer implements Party.Server {
         case "ready":
           this.handleReady(sender)
           break
+        case "settings":
+          this.handleSettings(sender, data.settings)
+          break
         case "start":
           this.handleStart(sender)
           break
         case "input":
           this.handleInput(sender, data.input)
+          break
+        case "reset":
+          this.handleReset(sender)
           break
         case "leave":
           this.handleLeave(sender)
@@ -270,6 +276,21 @@ export default class GameServer implements Party.Server {
     }
   }
 
+  handleSettings(conn: Party.Connection, settings: Partial<RoomSettings>) {
+    if (conn.id !== this.room.hostId || this.room.state !== "lobby") {
+      return
+    }
+
+    this.room.settings = {
+      ...this.room.settings,
+      ...settings,
+      maxPlayers: settings.maxPlayers
+        ? clamp(settings.maxPlayers, Math.max(2, this.room.players.length), 8)
+        : this.room.settings.maxPlayers,
+    }
+    this.broadcast({ type: "room_state", room: this.room })
+  }
+
   handleStart(conn: Party.Connection) {
     // Only host can start
     if (conn.id !== this.room.hostId) {
@@ -317,6 +338,12 @@ export default class GameServer implements Party.Server {
 
     this.broadcast({ type: "player_left", playerId: conn.id })
     this.broadcast({ type: "room_state", room: this.room })
+  }
+
+  handleReset(conn: Party.Connection) {
+    if (this.room.state === "ended" || conn.id === this.room.hostId) {
+      this.resetToLobby()
+    }
   }
 
   startGame() {

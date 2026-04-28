@@ -5,12 +5,18 @@ import { useRouter } from "next/navigation"
 import { AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
 import { GameCanvas } from "@/components/game/game-canvas"
-import { HUDOverlay } from "@/components/game/hud-overlay"
+import { HUDOverlay, type CombatNotice } from "@/components/game/hud-overlay"
 import { CountdownOverlay } from "@/components/game/countdown-overlay"
 import { EndMatchModal } from "@/components/game/end-match-modal"
 import { MobileControls } from "@/components/game/mobile-controls"
 import { useGameStore } from "@/store/game-store"
-import { createDemoClient, destroyDemoClient, getDemoClient, fullDestroyDemoClient } from "@/lib/party/demo-client"
+import {
+  createGameClient,
+  destroyGameClient,
+  fullDestroyGameClient,
+  getGameClient,
+  getGameClientPlayerId,
+} from "@/lib/party/session-client"
 import type { ServerMessage, GameState, InputState } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
@@ -36,6 +42,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
 
   const [showCountdown, setShowCountdown] = useState(false)
   const [countdownStartTime, setCountdownStartTime] = useState(0)
+  const [combatNotices, setCombatNotices] = useState<CombatNotice[]>([])
   const sequenceNumberRef = useRef(0)
 
   const getAttackerName = useCallback((attackerId: string) => {
@@ -45,6 +52,9 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     }
     if (attackerId === "hazard") {
       return "Arena hazard"
+    }
+    if (attackerId === "storm") {
+      return "Pulse ring"
     }
     if (attackerId === "burn") {
       return "burn"
@@ -58,25 +68,12 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     return latestState?.players.find((player) => player.id === attackerId)?.nickname ?? attackerId
   }, [])
 
-  const getPickupName = useCallback((type?: string) => {
-    switch (type) {
-      case "boost":
-        return "Speed boost"
-      case "shield":
-        return "Shield"
-      case "freeze":
-        return "Freeze pulse"
-      case "burn":
-        return "Burn wave"
-      case "bomb":
-        return "Bomb"
-      case "heal":
-        return "Health pack"
-      case "maxHealth":
-        return "Max health"
-      default:
-        return "Energy"
-    }
+  const pushCombatNotice = useCallback((message: string, tone: CombatNotice["tone"] = "danger") => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    setCombatNotices((current) => [{ id, message, tone }, ...current].slice(0, 2))
+    window.setTimeout(() => {
+      setCombatNotices((current) => current.filter((notice) => notice.id !== id))
+    }, 2200)
   }, [])
 
   // Handle incoming messages
@@ -94,19 +91,10 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         break
       case "player_hit":
         if (message.targetId === playerId) {
-          toast.error(`Hit by ${getAttackerName(message.attackerId)}`, {
-            duration: 1000,
-            position: "bottom-center",
-          })
+          pushCombatNotice(`${getAttackerName(message.attackerId)} hit you for ${message.damage}`)
         }
         break
       case "pickup_collected":
-        if (message.playerId === playerId) {
-          toast.success(`${getPickupName(message.pickupType)} +${message.points}`, {
-            duration: 1200,
-            position: "bottom-center",
-          })
-        }
         break
       case "match_end":
         setFinalScores(message.finalScores)
@@ -116,7 +104,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         toast.error(message.message)
         break
     }
-  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName, getPickupName])
+  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName, pushCombatNotice])
 
   // Connect using demo client
   useEffect(() => {
@@ -125,20 +113,20 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
       return
     }
 
-    // Create or get existing client
-    const client = createDemoClient({
+    // Create or get the selected local-demo or realtime PartyKit client.
+    const client = createGameClient({
       roomId,
       onMessage: handleMessage,
       onConnect: () => {
         setConnected(true)
-        const demoClient = getDemoClient()
-        if (demoClient) {
-          setPlayerId(demoClient.playerId)
+        const activeClient = getGameClient()
+        if (activeClient) {
+          setPlayerId(getGameClientPlayerId(activeClient))
           // The game should already be running from lobby, but if not, join and start
-          const room = demoClient.getRoom()
+          const room = activeClient.getRoom()
           if (room.players.length === 0) {
             // Re-join if needed
-            demoClient.join(settings.nickname, settings.color)
+            activeClient.join(settings.nickname, settings.color)
           }
         }
       },
@@ -153,13 +141,13 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     client.connect()
 
     return () => {
-      destroyDemoClient()
+      destroyGameClient()
     }
   }, [roomId, settings, handleMessage, router, setConnected, setPlayerId])
 
   // Handle input changes
   const handleInput = useCallback((input: InputState) => {
-    const client = getDemoClient()
+    const client = getGameClient()
     if (client?.isConnected) {
       sequenceNumberRef.current += 1
       client.sendInput(input, sequenceNumberRef.current)
@@ -175,7 +163,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   const handlePlayAgain = useCallback(() => {
     setShowEndMatch(false)
     setGameState(null)
-    getDemoClient()?.resetToLobby()
+    getGameClient()?.resetToLobby()
     router.push(`/lobby/${roomId}`)
   }, [setShowEndMatch, setGameState, router, roomId])
 
@@ -186,7 +174,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   }, [setShowEndMatch, setGameState, router, roomId])
 
   const handleLeave = useCallback(() => {
-    fullDestroyDemoClient()
+    fullDestroyGameClient()
     resetAll()
     router.push("/play")
   }, [resetAll, router])
@@ -219,6 +207,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
           gameState={gameState}
           currentPlayer={currentPlayer}
           roomCode={roomId}
+          combatNotices={combatNotices}
         />
       )}
 

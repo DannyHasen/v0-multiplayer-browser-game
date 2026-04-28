@@ -73,6 +73,7 @@ export interface GameState {
   boss?: BossState | null
   meleeEnemies?: MeleeEnemy[]
   bombs?: BombState[]
+  storm?: StormState | null
   timeRemaining: number
   matchState: RoomState
 }
@@ -155,6 +156,15 @@ export interface BombState {
   ownerId: string
 }
 
+export interface StormState {
+  x: number
+  y: number
+  radius: number
+  maxRadius: number
+  damage: number
+  active: boolean
+}
+
 export interface InputState {
   up: boolean
   down: boolean
@@ -175,8 +185,10 @@ export interface PlayerInput {
 export type ClientMessage =
   | { type: "join"; nickname: string; color: PlayerColor }
   | { type: "ready" }
+  | { type: "settings"; settings: Partial<RoomSettings> }
   | { type: "start" }
   | { type: "input"; input: InputState; sequenceNumber: number }
+  | { type: "reset" }
   | { type: "leave" }
 
 // Events from Server to Client
