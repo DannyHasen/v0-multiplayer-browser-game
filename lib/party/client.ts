@@ -66,7 +66,6 @@ export class PartyClient {
       this.socket = new PartySocket({
         host: PARTYKIT_HOST,
         room: this.roomId,
-        party: "game",
       })
 
       this.socket.addEventListener("open", () => {
