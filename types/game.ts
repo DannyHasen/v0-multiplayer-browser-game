@@ -15,6 +15,8 @@ export interface Player {
   dashCooldown: number
   abilityCooldown: number
   isInvulnerable: boolean
+  isRespawning?: boolean
+  respawnAt?: number
   lastDashTime: number
   lastAbilityTime: number
   connected: boolean
@@ -66,6 +68,8 @@ export interface GameState {
   players: Player[]
   pickups: Pickup[]
   hazards: Hazard[]
+  projectiles?: Projectile[]
+  boss?: BossState | null
   timeRemaining: number
   matchState: RoomState
 }
@@ -79,7 +83,7 @@ export interface Pickup {
   respawnAt?: number
 }
 
-export type PickupType = "energy" | "boost"
+export type PickupType = "energy" | "boost" | "shield"
 
 export interface Hazard {
   id: string
@@ -97,6 +101,32 @@ export interface Hazard {
 }
 
 export type HazardType = "static" | "moving"
+
+export interface Projectile {
+  id: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+  radius: number
+  damage: number
+  ownerId: string
+  type: "boss"
+  expiresAt: number
+}
+
+export interface BossState {
+  id: string
+  nickname: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+  health: number
+  maxHealth: number
+  targetPlayerId: string | null
+  fireCooldown: number
+}
 
 export interface InputState {
   up: boolean

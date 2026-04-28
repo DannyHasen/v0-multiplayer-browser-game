@@ -9,15 +9,16 @@ interface PlayerListProps {
   players: Player[]
   currentPlayerId: string | null
   hostId: string
+  maxPlayers: number
 }
 
-export function PlayerList({ players, currentPlayerId, hostId }: PlayerListProps) {
+export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: PlayerListProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Players</h2>
         <span className="text-sm text-muted-foreground">
-          {players.length}/8
+          {players.length}/{maxPlayers}
         </span>
       </div>
 
@@ -96,7 +97,7 @@ export function PlayerList({ players, currentPlayerId, hostId }: PlayerListProps
       </AnimatePresence>
 
       {/* Empty slots */}
-      {Array.from({ length: Math.max(0, 2 - players.length) }).map((_, i) => (
+      {Array.from({ length: Math.max(0, maxPlayers - players.length) }).map((_, i) => (
         <div
           key={`empty-${i}`}
           className="flex items-center gap-3 p-3 rounded-lg border border-dashed border-border/50 text-muted-foreground"

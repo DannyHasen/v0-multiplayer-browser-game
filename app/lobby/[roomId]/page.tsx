@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, use, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { Copy, Check, Play, LogOut, ArrowLeft } from "lucide-react"
+import { Bot, Copy, Check, Play, LogOut, ArrowLeft } from "lucide-react"
 import { toast } from "sonner"
 import { AnimatedBackground } from "@/components/landing/animated-background"
 import { PlayerList } from "@/components/room/player-list"
@@ -145,6 +145,18 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
     }
   }
 
+  const handleFillWithBots = () => {
+    const client = getDemoClient()
+    if (!client || !isHost) return
+
+    const added = client.fillWithBots()
+    if (added > 0) {
+      toast.success(`Added ${added} bot${added === 1 ? "" : "s"} to the lobby`)
+    } else {
+      toast.info("No open bot slots")
+    }
+  }
+
   const handleLeave = () => {
     fullDestroyDemoClient()
     resetAll()
@@ -238,7 +250,20 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
               players={displayRoom.players}
               currentPlayerId={playerId}
               hostId={displayRoom.hostId}
+              maxPlayers={displayRoom.settings.maxPlayers}
             />
+
+            {isHost && displayRoom.state === "lobby" && (
+              <Button
+                variant="outline"
+                onClick={handleFillWithBots}
+                disabled={displayRoom.players.length >= displayRoom.settings.maxPlayers}
+                className="mt-4 w-full gap-2"
+              >
+                <Bot className="w-4 h-4" />
+                Fill With Bots
+              </Button>
+            )}
           </motion.div>
 
           {/* Settings */}

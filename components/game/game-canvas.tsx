@@ -15,7 +15,7 @@ interface GameCanvasProps {
 export function GameCanvas({ gameState, currentPlayerId, theme, onInput }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | null>(null)
   const inputHandlerRef = useRef<InputHandler | null>(null)
   const dimensionsRef = useRef({ width: 0, height: 0 })
 

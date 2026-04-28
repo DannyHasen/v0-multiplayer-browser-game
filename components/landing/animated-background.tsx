@@ -16,7 +16,7 @@ export function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const particlesRef = useRef<Particle[]>([])
   const mouseRef = useRef({ x: 0, y: 0 })
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | null>(null)
 
   const initParticles = useCallback((width: number, height: number) => {
     const particles: Particle[] = []
@@ -46,6 +46,7 @@ export function AnimatedBackground() {
     const resizeCanvas = () => {
       const dpr = window.devicePixelRatio || 1
       const rect = canvas.getBoundingClientRect()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
       canvas.width = rect.width * dpr
       canvas.height = rect.height * dpr
       ctx.scale(dpr, dpr)

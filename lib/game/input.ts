@@ -20,6 +20,7 @@ export class InputHandler {
   private keyMap: Map<string, keyof InputState> = new Map()
   private boundHandleKeyDown: (e: KeyboardEvent) => void
   private boundHandleKeyUp: (e: KeyboardEvent) => void
+  private boundHandleBlur: () => void
   private isAttached = false
 
   constructor(options: InputHandlerOptions) {
@@ -41,6 +42,7 @@ export class InputHandler {
 
     this.boundHandleKeyDown = this.handleKeyDown.bind(this)
     this.boundHandleKeyUp = this.handleKeyUp.bind(this)
+    this.boundHandleBlur = this.handleBlur.bind(this)
   }
 
   attach() {
@@ -48,7 +50,7 @@ export class InputHandler {
 
     window.addEventListener("keydown", this.boundHandleKeyDown)
     window.addEventListener("keyup", this.boundHandleKeyUp)
-    window.addEventListener("blur", this.handleBlur.bind(this))
+    window.addEventListener("blur", this.boundHandleBlur)
     this.isAttached = true
   }
 
@@ -57,7 +59,7 @@ export class InputHandler {
 
     window.removeEventListener("keydown", this.boundHandleKeyDown)
     window.removeEventListener("keyup", this.boundHandleKeyUp)
-    window.removeEventListener("blur", this.handleBlur.bind(this))
+    window.removeEventListener("blur", this.boundHandleBlur)
     this.isAttached = false
     this.resetInput()
   }

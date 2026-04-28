@@ -1,4 +1,4 @@
-import type { Player, Pickup, Hazard, GameState, MapTheme } from "@/types/game"
+import type { Player, Pickup, Hazard, Projectile, BossState, GameState, MapTheme } from "@/types/game"
 import { PLAYER_COLORS } from "@/types/game"
 import { ARENA, PLAYER, PICKUP, MAP_THEMES, VISUAL } from "./constants"
 
@@ -49,7 +49,7 @@ export function render(
   canvasHeight: number,
   theme: MapTheme = "cyber"
 ) {
-  const time = performance.now()
+  const time = Date.now()
 
   // Calculate scale to fit arena in canvas
   const scaleX = canvasWidth / ARENA.WIDTH
@@ -79,7 +79,9 @@ export function render(
   drawGrid(renderCtx)
   drawHazards(renderCtx, gameState.hazards)
   drawPickups(renderCtx, gameState.pickups)
+  drawProjectiles(renderCtx, gameState.projectiles ?? [])
   drawTrails(renderCtx, gameState.players)
+  drawBoss(renderCtx, gameState.boss ?? null)
   drawPlayers(renderCtx, gameState.players, currentPlayerId)
   drawEffects(renderCtx, gameState.players)
 }
@@ -201,7 +203,10 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
     ctx.ctx.rotate(rotation)
 
     // Glow
-    const color = pickup.type === "energy" ? "#00ffff" : "#ffff00"
+    const color =
+      pickup.type === "energy" ? "#00ffff" :
+      pickup.type === "shield" ? "#00ff88" :
+      "#ffff00"
     ctx.ctx.shadowColor = color
     ctx.ctx.shadowBlur = 20 * pulse
 
@@ -213,6 +218,13 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
       ctx.ctx.lineTo(size * pulse, 0)
       ctx.ctx.lineTo(0, size * pulse)
       ctx.ctx.lineTo(-size * pulse, 0)
+      ctx.ctx.closePath()
+    } else if (pickup.type === "shield") {
+      // Shield shape
+      ctx.ctx.moveTo(0, -size * pulse)
+      ctx.ctx.quadraticCurveTo(size * pulse, -size * 0.4 * pulse, size * 0.7 * pulse, size * 0.45 * pulse)
+      ctx.ctx.quadraticCurveTo(0, size * pulse, -size * 0.7 * pulse, size * 0.45 * pulse)
+      ctx.ctx.quadraticCurveTo(-size * pulse, -size * 0.4 * pulse, 0, -size * pulse)
       ctx.ctx.closePath()
     } else {
       // Star shape for boost
@@ -234,6 +246,89 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
     ctx.ctx.restore()
     ctx.ctx.shadowBlur = 0
   })
+}
+
+function drawProjectiles(ctx: RenderContext, projectiles: Projectile[]) {
+  projectiles.forEach((projectile) => {
+    const x = ctx.offsetX + projectile.x * ctx.scale
+    const y = ctx.offsetY + projectile.y * ctx.scale
+    const radius = projectile.radius * ctx.scale
+    const pulse = Math.sin(ctx.time * 0.01 + projectile.x) * 0.2 + 0.8
+
+    ctx.ctx.beginPath()
+    ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.ctx.fillStyle = `rgba(255, 80, 120, ${0.75 * pulse})`
+    ctx.ctx.shadowColor = "#ff3c78"
+    ctx.ctx.shadowBlur = 18
+    ctx.ctx.fill()
+
+    ctx.ctx.beginPath()
+    ctx.ctx.arc(x, y, radius * 0.45, 0, Math.PI * 2)
+    ctx.ctx.fillStyle = "#ffffff"
+    ctx.ctx.fill()
+    ctx.ctx.shadowBlur = 0
+  })
+}
+
+function drawBoss(ctx: RenderContext, boss: BossState | null) {
+  if (!boss) return
+
+  const x = ctx.offsetX + boss.x * ctx.scale
+  const y = ctx.offsetY + boss.y * ctx.scale
+  const size = 48 * ctx.scale
+  const angle = Math.atan2(boss.vy, boss.vx)
+  const pulse = Math.sin(ctx.time * 0.004) * 0.12 + 1
+
+  ctx.ctx.save()
+  ctx.ctx.translate(x, y)
+  ctx.ctx.rotate(Number.isFinite(angle) ? angle : 0)
+  ctx.ctx.scale(pulse, pulse)
+
+  ctx.ctx.shadowColor = "#ff3c78"
+  ctx.ctx.shadowBlur = 28
+  ctx.ctx.fillStyle = "#21000d"
+  ctx.ctx.strokeStyle = "#ff3c78"
+  ctx.ctx.lineWidth = 3
+
+  ctx.ctx.beginPath()
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI * 2 * i) / 8
+    const r = i % 2 === 0 ? size : size * 0.72
+    const px = Math.cos(a) * r
+    const py = Math.sin(a) * r
+    if (i === 0) ctx.ctx.moveTo(px, py)
+    else ctx.ctx.lineTo(px, py)
+  }
+  ctx.ctx.closePath()
+  ctx.ctx.fill()
+  ctx.ctx.stroke()
+
+  ctx.ctx.beginPath()
+  ctx.ctx.moveTo(size * 0.8, 0)
+  ctx.ctx.lineTo(size * 0.2, -size * 0.25)
+  ctx.ctx.lineTo(size * 0.2, size * 0.25)
+  ctx.ctx.closePath()
+  ctx.ctx.fillStyle = "#ffffff"
+  ctx.ctx.fill()
+  ctx.ctx.restore()
+  ctx.ctx.shadowBlur = 0
+
+  const barWidth = size * 2.2
+  const barHeight = 6
+  const healthPercent = Math.max(0, boss.health / boss.maxHealth)
+  ctx.ctx.fillStyle = "rgba(0, 0, 0, 0.6)"
+  ctx.ctx.fillRect(x - barWidth / 2, y - size - 18, barWidth, barHeight)
+  ctx.ctx.fillStyle = "#ff3c78"
+  ctx.ctx.fillRect(x - barWidth / 2, y - size - 18, barWidth * healthPercent, barHeight)
+
+  ctx.ctx.font = `bold ${12 * Math.min(ctx.scale, 1.2)}px sans-serif`
+  ctx.ctx.textAlign = "center"
+  ctx.ctx.textBaseline = "top"
+  ctx.ctx.fillStyle = "#ff9ab7"
+  ctx.ctx.shadowColor = "#000000"
+  ctx.ctx.shadowBlur = 4
+  ctx.ctx.fillText(boss.nickname, x, y + size + 10)
+  ctx.ctx.shadowBlur = 0
 }
 
 function drawTrails(ctx: RenderContext, players: Player[]) {
@@ -297,8 +392,10 @@ function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: str
     ctx.ctx.translate(x, y)
     ctx.ctx.rotate(angle)
 
-    // Invulnerability effect
-    if (player.isInvulnerable) {
+    // Respawn and invulnerability effects
+    if (player.isRespawning) {
+      ctx.ctx.globalAlpha = 0.25
+    } else if (player.isInvulnerable) {
       const flash = Math.sin(ctx.time * 0.02) > 0
       ctx.ctx.globalAlpha = flash ? 1 : 0.5
     }
@@ -386,7 +483,7 @@ function drawEffects(ctx: RenderContext, players: Player[]) {
   // Draw shockwave effects for players who recently used ability
   players.forEach((player) => {
     const timeSinceAbility = ctx.time - player.lastAbilityTime
-    if (timeSinceAbility < 500) {
+    if (timeSinceAbility >= 0 && timeSinceAbility < 500) {
       const x = ctx.offsetX + player.x * ctx.scale
       const y = ctx.offsetY + player.y * ctx.scale
       const progress = timeSinceAbility / 500
@@ -402,7 +499,7 @@ function drawEffects(ctx: RenderContext, players: Player[]) {
 
     // Dash effect
     const timeSinceDash = ctx.time - player.lastDashTime
-    if (timeSinceDash < 200) {
+    if (timeSinceDash >= 0 && timeSinceDash < 200) {
       const x = ctx.offsetX + player.x * ctx.scale
       const y = ctx.offsetY + player.y * ctx.scale
       const progress = timeSinceDash / 200

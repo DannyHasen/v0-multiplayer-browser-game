@@ -1,7 +1,7 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Timer, Zap, Radio, Copy, Check } from "lucide-react"
+import { Timer, Zap, Radio, Copy, Check, Skull } from "lucide-react"
 import { useState } from "react"
 import { Progress } from "@/components/ui/progress"
 import { formatTime, PLAYER } from "@/lib/game/constants"
@@ -24,6 +24,9 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
 
   // Sort players by score for leaderboard
   const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score)
+  const respawnSeconds = currentPlayer?.respawnAt
+    ? Math.max(0, Math.ceil((currentPlayer.respawnAt - Date.now()) / 1000))
+    : 0
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -72,7 +75,7 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-card/80 backdrop-blur-sm rounded-lg px-6 py-3 border border-border"
+          className="bg-card/80 backdrop-blur-sm rounded-lg px-6 py-3 border border-border min-w-[170px]"
         >
           <div className="flex items-center gap-2">
             <Timer className="w-5 h-5 text-primary" />
@@ -80,6 +83,20 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
               {formatTime(gameState.timeRemaining)}
             </span>
           </div>
+          {gameState.boss && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span>{gameState.boss.nickname}</span>
+                <span>{Math.ceil(gameState.boss.health)}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-destructive"
+                  style={{ width: `${Math.max(0, (gameState.boss.health / gameState.boss.maxHealth) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
         </motion.div>
 
         {/* Mini leaderboard */}
@@ -113,6 +130,20 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
           </div>
         </motion.div>
       </div>
+
+      {currentPlayer?.isRespawning && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="absolute inset-0 flex items-center justify-center"
+        >
+          <div className="rounded-lg border border-destructive/50 bg-background/80 px-8 py-6 text-center backdrop-blur-sm">
+            <Skull className="mx-auto mb-3 h-10 w-10 text-destructive" />
+            <div className="text-2xl font-bold text-destructive">Respawning</div>
+            <div className="mt-1 font-mono text-4xl text-foreground">{respawnSeconds}</div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Bottom bar - Cooldowns and Room Code */}
       <div className="absolute bottom-0 left-0 right-0 p-4 flex items-end justify-between">

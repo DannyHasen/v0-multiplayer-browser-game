@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -142,8 +142,8 @@ export function RoomForm() {
                     boxShadow: selectedColor === color 
                       ? `0 0 20px ${PLAYER_COLORS[color]}80` 
                       : `0 0 10px ${PLAYER_COLORS[color]}40`,
-                    ringColor: PLAYER_COLORS[color],
-                  }}
+                    "--tw-ring-color": PLAYER_COLORS[color],
+                  } as CSSProperties}
                   aria-label={`Select ${color} color`}
                 />
               ))}

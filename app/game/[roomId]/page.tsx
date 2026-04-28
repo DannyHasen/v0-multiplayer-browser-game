@@ -38,6 +38,18 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   const [countdownStartTime, setCountdownStartTime] = useState(0)
   const sequenceNumberRef = useRef(0)
 
+  const getAttackerName = useCallback((attackerId: string) => {
+    const latestState = useGameStore.getState().gameState
+    if (attackerId === "boss") {
+      return latestState?.boss?.nickname ?? "Arena Warden"
+    }
+    if (attackerId === "hazard") {
+      return "Arena hazard"
+    }
+
+    return latestState?.players.find((player) => player.id === attackerId)?.nickname ?? attackerId
+  }, [])
+
   // Handle incoming messages
   const handleMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
@@ -53,7 +65,10 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         break
       case "player_hit":
         if (message.targetId === playerId) {
-          toast.error(`Hit by ${message.attackerId}!`, { duration: 1000 })
+          toast.error(`Hit by ${getAttackerName(message.attackerId)}`, {
+            duration: 1000,
+            position: "bottom-center",
+          })
         }
         break
       case "pickup_collected":
@@ -69,7 +84,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         toast.error(message.message)
         break
     }
-  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId])
+  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName])
 
   // Connect using demo client
   useEffect(() => {
@@ -128,8 +143,9 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   const handlePlayAgain = useCallback(() => {
     setShowEndMatch(false)
     setGameState(null)
-    // Server will handle resetting to lobby
-  }, [setShowEndMatch, setGameState])
+    getDemoClient()?.resetToLobby()
+    router.push(`/lobby/${roomId}`)
+  }, [setShowEndMatch, setGameState, router, roomId])
 
   const handleReturnToLobby = useCallback(() => {
     setShowEndMatch(false)

@@ -1,5 +1,17 @@
-import type { Room, Player, PlayerColor, InputState, GameState, ServerMessage } from "@/types/game"
-import { MATCH, PLAYER_COLORS } from "@/lib/game/constants"
+import type {
+  Room,
+  Player,
+  PlayerColor,
+  InputState,
+  GameState,
+  ServerMessage,
+  RoomSettings,
+  Pickup,
+  Hazard,
+  Projectile,
+  BossState,
+} from "@/types/game"
+import { MATCH } from "@/lib/game/constants"
 
 export type MessageHandler = (message: ServerMessage) => void
 export type ConnectionHandler = () => void
@@ -21,7 +33,8 @@ function generatePlayerId(): string {
 // Demo client that simulates a multiplayer session locally
 // Game constants for physics
 const ARENA_WIDTH = 1200
-const ARENA_HEIGHT = 700
+const ARENA_HEIGHT = 800
+const PLAYER_RADIUS = 30
 const PLAYER_SPEED = 5
 const DASH_SPEED = 15
 const DASH_DURATION = 150 // ms
@@ -29,6 +42,116 @@ const DASH_COOLDOWN = 3000 // ms
 const ABILITY_COOLDOWN = 5000 // ms
 const SHOCKWAVE_RADIUS = 100
 const SHOCKWAVE_DAMAGE = 20
+const BOOST_DURATION = 3000 // ms
+const BOOST_MULTIPLIER = 1.6
+const SHIELD_DURATION = 4000 // ms
+const PICKUP_RESPAWN_DELAY = 5000 // ms
+const HAZARD_DAMAGE = 12
+const HAZARD_HIT_COOLDOWN = 700 // ms
+const RESPAWN_DELAY = 2000 // ms
+const RESPAWN_INVULNERABILITY = 1200 // ms
+const MAX_BOTS = 7
+const BOSS_SPEED = 1.45
+const BOSS_RADIUS = 48
+const BOSS_CONTACT_DAMAGE = 20
+const BOSS_FIRE_INTERVAL = 1300
+const BOSS_PROJECTILE_SPEED = 7
+const BOSS_PROJECTILE_RADIUS = 12
+const BOSS_PROJECTILE_DAMAGE = 18
+const PROJECTILE_LIFETIME = 3500
+
+const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
+  { nickname: "NeonBot", color: "magenta" },
+  { nickname: "CyberAce", color: "yellow" },
+  { nickname: "PixelPunk", color: "lime" },
+  { nickname: "ByteRider", color: "orange" },
+  { nickname: "GlitchKid", color: "pink" },
+  { nickname: "TurboHex", color: "teal" },
+  { nickname: "VoidRunner", color: "purple" },
+]
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function createDemoPickups(): Pickup[] {
+  return [
+    { id: "p1", type: "energy", x: 150, y: 150, collected: false },
+    { id: "p2", type: "energy", x: ARENA_WIDTH - 150, y: 150, collected: false },
+    { id: "p3", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 + 180, collected: false },
+    { id: "p4", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
+    { id: "p5", type: "energy", x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
+    { id: "p6", type: "shield", x: ARENA_WIDTH / 2, y: 140, collected: false },
+    { id: "p7", type: "shield", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 140, collected: false },
+  ]
+}
+
+function createDemoHazards(): Hazard[] {
+  return [
+    { id: "h1", type: "static", x: 100, y: 100, width: 80, height: 80 },
+    { id: "h2", type: "static", x: ARENA_WIDTH - 180, y: 100, width: 80, height: 80 },
+    { id: "h3", type: "static", x: 100, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
+    { id: "h4", type: "static", x: ARENA_WIDTH - 180, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
+    {
+      id: "h5",
+      type: "moving",
+      x: ARENA_WIDTH / 2 - 30,
+      y: 150,
+      width: 60,
+      height: 60,
+      vx: 2.4,
+      vy: 0,
+      patternStartX: 220,
+      patternEndX: ARENA_WIDTH - 220,
+    },
+    {
+      id: "h6",
+      type: "moving",
+      x: 160,
+      y: ARENA_HEIGHT / 2 - 30,
+      width: 60,
+      height: 60,
+      vx: 0,
+      vy: 2.2,
+      patternStartY: 220,
+      patternEndY: ARENA_HEIGHT - 220,
+    },
+  ]
+}
+
+function circleRectCollide(
+  cx: number,
+  cy: number,
+  radius: number,
+  rx: number,
+  ry: number,
+  rw: number,
+  rh: number
+): boolean {
+  const closestX = clamp(cx, rx, rx + rw)
+  const closestY = clamp(cy, ry, ry + rh)
+  const dx = cx - closestX
+  const dy = cy - closestY
+  return dx * dx + dy * dy < radius * radius
+}
+
+type DemoPlayerState = {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  score: number
+  health: number
+  isDashing: boolean
+  dashEndTime: number
+  lastDashTime: number
+  lastAbilityTime: number
+  boostUntil: number
+  shieldUntil: number
+  lastHazardHitTime: number
+  respawnInvulnerableUntil: number
+  respawnAt: number | null
+}
 
 export class DemoClient {
   private roomId: string
@@ -39,8 +162,13 @@ export class DemoClient {
   private room: Room
   private connected = false
   private paused = false
-  private gameLoopInterval: NodeJS.Timer | null = null
+  private gameLoopInterval: ReturnType<typeof setInterval> | null = null
   private gameStartTime: number | null = null
+  private gamePickups: Pickup[] = []
+  private hazards: Hazard[] = []
+  private projectiles: Projectile[] = []
+  private boss: BossState | null = null
+  private lastBossFireTime = 0
   
   // Player input state
   private currentInput: InputState = {
@@ -53,18 +181,7 @@ export class DemoClient {
   }
   
   // Game state tracking
-  private playerStates: Map<string, {
-    x: number
-    y: number
-    vx: number
-    vy: number
-    score: number
-    health: number
-    isDashing: boolean
-    dashEndTime: number
-    lastDashTime: number
-    lastAbilityTime: number
-  }> = new Map()
+  private playerStates: Map<string, DemoPlayerState> = new Map()
 
   constructor(options: DemoClientOptions, existingRoom?: Room | null, existingPlayerId?: string | null, existingGameStartTime?: number | null) {
     this.roomId = options.roomId
@@ -104,8 +221,12 @@ export class DemoClient {
       // Send current room state
       this.messageHandler({ type: "room_state", room: { ...this.room } })
       
-      // If game was in progress, restart the game loop immediately
-      if (this.room.state === "playing" || this.room.state === "countdown") {
+      if (this.room.state === "countdown" && this.gameStartTime) {
+        this.messageHandler({ type: "countdown_start", startTime: this.gameStartTime })
+      }
+
+      // If game was in progress, restart the game loop immediately.
+      if (this.room.state === "playing") {
         if (!this.gameLoopInterval) {
           this.continueGameLoop()
         }
@@ -135,6 +256,8 @@ export class DemoClient {
   }
 
   connect(): void {
+    if (this.connected) return
+
     // Simulate connection delay
     setTimeout(() => {
       this.connected = true
@@ -180,9 +303,6 @@ export class DemoClient {
       this.room.hostId = player.id
     }
     
-    // Add bots after a short delay to let settings load from store
-    setTimeout(() => this.addDemoPlayers(), 500)
-    
     // Send room state
     this.messageHandler({ type: "room_state", room: { ...this.room } })
     this.messageHandler({ type: "player_joined", player })
@@ -190,76 +310,80 @@ export class DemoClient {
   
   // Allow updating settings from the UI
   updateSettings(settings: Partial<RoomSettings>): void {
-    this.room.settings = { ...this.room.settings, ...settings }
+    this.room.settings = {
+      ...this.room.settings,
+      ...settings,
+      maxPlayers: settings.maxPlayers
+        ? clamp(settings.maxPlayers, 2, 8)
+        : this.room.settings.maxPlayers,
+    }
+    this.trimBotsToMaxPlayers()
     this.messageHandler({ type: "room_state", room: { ...this.room } })
   }
 
-  private botsAdded = false
-  
-  private addDemoPlayers(): void {
-    // Prevent adding bots multiple times
-    if (this.botsAdded) return
-    this.botsAdded = true
-    
-    const aiColors: PlayerColor[] = ["magenta", "yellow", "lime"]
-    const aiNames = ["NeonBot", "CyberAce", "PixelPunk"]
-    
-    // Simple: add 1 bot for 2-player game, or fill up to maxPlayers-1 for larger games
-    const maxPlayers = this.room.settings.maxPlayers
-    const slotsForBots = maxPlayers - 1 // Leave 1 slot for the human
-    const numBots = Math.min(slotsForBots, 3) // Cap at 3 bots max
-    
+  addBot(): boolean {
+    if (this.room.state !== "lobby") return false
+    if (this.room.players.length >= this.room.settings.maxPlayers) return false
+    if (this.getBotCount() >= MAX_BOTS) return false
 
-    
-    for (let i = 0; i < numBots; i++) {
-      setTimeout(() => {
-        if (!this.connected) return
-        
-        // Double-check we haven't exceeded maxPlayers
-        if (this.room.players.length >= maxPlayers) {
+    const nextBotIndex = this.getNextBotIndex()
+    if (nextBotIndex === -1) return false
 
-          return
-        }
-        
-        const aiId = `bot-${i}-${this.roomId}`
-        
-        // Don't add if already exists
-        if (this.room.players.some(p => p.id === aiId)) return
-        
-        const aiPlayer: Player = {
-          id: aiId,
-          nickname: aiNames[i],
-          color: aiColors[i],
-          x: 200 + i * 200,
-          y: 200 + i * 100,
-          vx: 0,
-          vy: 0,
-          health: 100,
-          score: 0,
-          isReady: false,
-          isHost: false,
-          dashCooldown: 0,
-          abilityCooldown: 0,
-          isInvulnerable: false,
-          lastDashTime: 0,
-          lastAbilityTime: 0,
-          connected: true,
-        }
-        
-        this.room.players.push(aiPlayer)
-        this.messageHandler({ type: "room_state", room: { ...this.room } })
-        this.messageHandler({ type: "player_joined", player: aiPlayer })
-        
-        // AI players ready up after a bit
-        setTimeout(() => {
-          if (!this.connected) return
-          const playerIndex = this.room.players.findIndex(p => p.id === aiId)
-          if (playerIndex !== -1) {
-            this.room.players[playerIndex].isReady = true
-            this.messageHandler({ type: "room_state", room: { ...this.room } })
-          }
-        }, 1000 + Math.random() * 2000)
-      }, 500 + i * 1000)
+    const profile = BOT_PROFILES[nextBotIndex]
+    const botId = `bot-${profile.nickname.toLowerCase()}-${this.roomId}`
+    if (this.room.players.some((player) => player.id === botId)) return false
+
+    const botNumber = this.getBotCount()
+    const botPlayer: Player = {
+      id: botId,
+      nickname: profile.nickname,
+      color: profile.color,
+      x: 200 + (botNumber % 4) * 220,
+      y: 200 + Math.floor(botNumber / 4) * 180,
+      vx: 0,
+      vy: 0,
+      health: 100,
+      score: 0,
+      isReady: true,
+      isHost: false,
+      dashCooldown: 0,
+      abilityCooldown: 0,
+      isInvulnerable: false,
+      lastDashTime: 0,
+      lastAbilityTime: 0,
+      connected: true,
+    }
+
+    this.room.players.push(botPlayer)
+    this.messageHandler({ type: "player_joined", player: botPlayer })
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
+    return true
+  }
+
+  fillWithBots(): number {
+    let added = 0
+    while (this.addBot()) {
+      added += 1
+    }
+    return added
+  }
+
+  private getBotCount(): number {
+    return this.room.players.filter((player) => player.id.startsWith("bot-")).length
+  }
+
+  private getNextBotIndex(): number {
+    return BOT_PROFILES.findIndex((profile) =>
+      !this.room.players.some((player) => player.id === `bot-${profile.nickname.toLowerCase()}-${this.roomId}`)
+    )
+  }
+
+  private trimBotsToMaxPlayers(): void {
+    while (this.room.players.length > this.room.settings.maxPlayers) {
+      const botIndex = this.room.players.findLastIndex((player) => player.id.startsWith("bot-"))
+      if (botIndex === -1) break
+      const [removed] = this.room.players.splice(botIndex, 1)
+      this.messageHandler({ type: "player_left", playerId: removed.id })
     }
   }
 
@@ -280,11 +404,12 @@ export class DemoClient {
     // Store the time when game will start
     this.gameStartTime = Date.now() + 3000
     isGameRunning = true
-    this.messageHandler({ type: "countdown_start", countdown: 3, startTime: this.gameStartTime })
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
+    this.messageHandler({ type: "countdown_start", startTime: this.gameStartTime })
     
     // Start the game after countdown
     setTimeout(() => {
-      if (!this.connected) return
+      if (!this.connected || this.room.state !== "countdown") return
       this.room.state = "playing"
       this.startGameLoop()
     }, 3000)
@@ -295,12 +420,32 @@ export class DemoClient {
     if (!this.gameStartTime) {
       this.gameStartTime = Date.now()
     }
+    if (this.playerStates.size === 0) {
+      this.initializePlayerStates()
+    }
+    if (this.gamePickups.length === 0) {
+      this.gamePickups = createDemoPickups()
+    }
+    if (this.hazards.length === 0) {
+      this.hazards = createDemoHazards()
+    }
+    if (!this.boss) {
+      this.boss = this.createBoss()
+    }
     this.runGameLoop()
   }
 
   private startGameLoop(): void {
     // Start fresh game
     this.gameStartTime = Date.now()
+    this.playerStates.clear()
+    this.aiTargets.clear()
+    this.initializePlayerStates()
+    this.gamePickups = createDemoPickups()
+    this.hazards = createDemoHazards()
+    this.projectiles = []
+    this.boss = this.createBoss()
+    this.lastBossFireTime = Date.now()
     this.runGameLoop()
   }
 
@@ -323,32 +468,22 @@ export class DemoClient {
         dashEndTime: 0,
         lastDashTime: 0,
         lastAbilityTime: 0,
+        boostUntil: 0,
+        shieldUntil: 0,
+        lastHazardHitTime: 0,
+        respawnInvulnerableUntil: Date.now() + RESPAWN_INVULNERABILITY,
+        respawnAt: null,
       })
     })
   }
 
   private runGameLoop(): void {
     const startTime = this.gameStartTime || Date.now()
-    
-    // Initialize player positions
-    this.initializePlayerStates()
-    
-    // Store pickups with positions and respawn tracking
-    const pickups: Array<{
-      id: string
-      type: "energy" | "boost"
-      x: number
-      y: number
-      collected: boolean
-      respawnAt?: number
-    }> = [
-      { id: "p1", type: "energy", x: 150, y: 150, collected: false },
-      { id: "p2", type: "energy", x: ARENA_WIDTH - 150, y: 150, collected: false },
-      { id: "p3", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
-      { id: "p4", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
-      { id: "p5", type: "energy", x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
-    ]
-    
+
+    this.stopGameLoop()
+    this.room.state = "playing"
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
+
     this.gameLoopInterval = setInterval(() => {
       if (!this.connected || this.paused) {
         return
@@ -357,18 +492,32 @@ export class DemoClient {
       const now = Date.now()
       const elapsed = (now - startTime) / 1000
       const timeRemaining = Math.max(0, this.room.settings.matchDuration - elapsed)
+
+      this.updateHazards()
+      this.updateBoss(now)
+      this.updateProjectiles(now)
       
       // Process player movement
       this.room.players.forEach((player, index) => {
         const state = this.playerStates.get(player.id)
         if (!state) return
+
+        if (state.respawnAt) {
+          if (now >= state.respawnAt) {
+            this.finishRespawn(state, now)
+          } else {
+            state.vx = 0
+            state.vy = 0
+            return
+          }
+        }
         
         // Get input - only process for the human player
         const isHumanPlayer = player.id === this._playerId
         const input = isHumanPlayer ? this.currentInput : this.getAIInput(player.id, index, now)
         
         // Calculate velocity based on input
-        let speed = PLAYER_SPEED
+        let speed = now < state.boostUntil ? PLAYER_SPEED * BOOST_MULTIPLIER : PLAYER_SPEED
         
         // Handle dashing
         if (state.isDashing && now < state.dashEndTime) {
@@ -408,17 +557,47 @@ export class DemoClient {
         state.y += state.vy
         
         // Keep player in bounds
-        state.x = Math.max(20, Math.min(ARENA_WIDTH - 20, state.x))
-        state.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, state.y))
+        state.x = clamp(state.x, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+        state.y = clamp(state.y, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
+
+        this.applyHazardCollisions(player.id, state, now)
         
         // Handle ability (shockwave)
         if (input.ability && now - state.lastAbilityTime > ABILITY_COOLDOWN) {
           state.lastAbilityTime = now
+
+          if (this.boss) {
+            const distToBoss = Math.sqrt(
+              Math.pow(this.boss.x - state.x, 2) +
+              Math.pow(this.boss.y - state.y, 2)
+            )
+
+            if (distToBoss < SHOCKWAVE_RADIUS + BOSS_RADIUS) {
+              this.boss.health = Math.max(0, this.boss.health - SHOCKWAVE_DAMAGE)
+              state.score += 75
+              const angle = Math.atan2(this.boss.y - state.y, this.boss.x - state.x)
+              this.boss.vx += Math.cos(angle) * 4
+              this.boss.vy += Math.sin(angle) * 4
+
+              if (this.boss.health <= 0) {
+                state.score += 350
+                this.boss = this.createBoss()
+                this.lastBossFireTime = now + 1500
+              }
+            }
+          }
+
           // Check for nearby players to damage
           this.room.players.forEach(otherPlayer => {
             if (otherPlayer.id === player.id) return
             const otherState = this.playerStates.get(otherPlayer.id)
             if (!otherState) return
+            if (
+              otherState.respawnAt ||
+              otherState.isDashing ||
+              now < otherState.shieldUntil ||
+              now < otherState.respawnInvulnerableUntil
+            ) return
             
             const dist = Math.sqrt(
               Math.pow(otherState.x - state.x, 2) + 
@@ -428,14 +607,18 @@ export class DemoClient {
             if (dist < SHOCKWAVE_RADIUS) {
               otherState.health = Math.max(0, otherState.health - SHOCKWAVE_DAMAGE)
               state.score += 50 // Points for hitting
-              
+
+              this.messageHandler({
+                type: "player_hit",
+                attackerId: player.id,
+                targetId: otherPlayer.id,
+                damage: SHOCKWAVE_DAMAGE,
+              })
+               
               // Bonus points for knockout
               if (otherState.health <= 0) {
                 state.score += 200
-                // Respawn the knocked out player
-                otherState.health = 100
-                otherState.x = ARENA_WIDTH / 2 + (Math.random() - 0.5) * 200
-                otherState.y = ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 200
+                this.startRespawn(otherState, now)
               } else {
                 // Knockback only if not knocked out
                 const angle = Math.atan2(otherState.y - state.y, otherState.x - state.x)
@@ -443,30 +626,44 @@ export class DemoClient {
                 otherState.y += Math.sin(angle) * 50
                 
                 // Keep in bounds after knockback
-                otherState.x = Math.max(20, Math.min(ARENA_WIDTH - 20, otherState.x))
-                otherState.y = Math.max(20, Math.min(ARENA_HEIGHT - 20, otherState.y))
+                otherState.x = clamp(otherState.x, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+                otherState.y = clamp(otherState.y, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
               }
             }
           })
         }
         
         // Check pickup collisions
-        pickups.forEach(pickup => {
+        this.gamePickups.forEach(pickup => {
           if (pickup.collected) return
           const dist = Math.sqrt(
             Math.pow(pickup.x - state.x, 2) + 
             Math.pow(pickup.y - state.y, 2)
           )
-          if (dist < 30) {
+          if (dist < PLAYER_RADIUS + 20) {
             pickup.collected = true
-            pickup.respawnAt = now + 5000 // Track when to respawn
-            state.score += pickup.type === "boost" ? 100 : 25
+            pickup.respawnAt = now + PICKUP_RESPAWN_DELAY
+            const points = pickup.type === "boost" ? 40 : 25
+            state.score += points
+
+            if (pickup.type === "boost") {
+              state.boostUntil = now + BOOST_DURATION
+            } else if (pickup.type === "shield") {
+              state.shieldUntil = now + SHIELD_DURATION
+            }
+
+            this.messageHandler({
+              type: "pickup_collected",
+              pickupId: pickup.id,
+              playerId: player.id,
+              points,
+            })
           }
         })
       })
       
       // Handle pickup respawning (outside of player loop)
-      pickups.forEach(pickup => {
+      this.gamePickups.forEach(pickup => {
         if (pickup.collected && pickup.respawnAt && now >= pickup.respawnAt) {
           pickup.collected = false
           pickup.respawnAt = undefined
@@ -487,12 +684,19 @@ export class DemoClient {
             vy: state.vy,
             score: state.score,
             health: state.health,
-            dashCooldown: Math.max(0, DASH_COOLDOWN - (now - state.lastDashTime)) / 1000,
-            abilityCooldown: Math.max(0, ABILITY_COOLDOWN - (now - state.lastAbilityTime)) / 1000,
+            dashCooldown: Math.max(0, DASH_COOLDOWN - (now - state.lastDashTime)),
+            abilityCooldown: Math.max(0, ABILITY_COOLDOWN - (now - state.lastAbilityTime)),
+            isInvulnerable: state.isDashing || now < state.respawnInvulnerableUntil || now < state.shieldUntil,
+            isRespawning: state.respawnAt !== null,
+            respawnAt: state.respawnAt ?? undefined,
+            lastDashTime: state.lastDashTime,
+            lastAbilityTime: state.lastAbilityTime,
           }
         }),
-        pickups: pickups.filter(p => !p.collected),
-        hazards: [],
+        pickups: this.gamePickups.filter(p => !p.collected),
+        hazards: this.hazards.map(hazard => ({ ...hazard })),
+        projectiles: this.projectiles.map(projectile => ({ ...projectile })),
+        boss: this.boss ? { ...this.boss } : null,
         timeRemaining,
         matchState: "playing",
       }
@@ -504,12 +708,270 @@ export class DemoClient {
         this.stopGameLoop()
         this.room.state = "ended"
         isGameRunning = false
-        const scores = gameState.players
-          .map(p => ({ playerId: p.id, nickname: p.nickname, score: p.score, color: p.color }))
+        const finalScores = gameState.players
+          .map(p => ({ playerId: p.id, nickname: p.nickname, score: Math.round(p.score), color: p.color }))
           .sort((a, b) => b.score - a.score)
-        this.messageHandler({ type: "game_end", scores })
+        this.messageHandler({ type: "match_end", finalScores })
+        this.messageHandler({ type: "room_state", room: { ...this.room } })
+
+        setTimeout(() => {
+          if (this.room.state === "ended") {
+            this.resetToLobby()
+          }
+        }, 8000)
       }
     }, 1000 / 60) // 60 FPS updates
+  }
+
+  private createBoss(): BossState {
+    const maxHealth = 320 + this.room.players.length * 35
+    return {
+      id: "boss",
+      nickname: "Arena Warden",
+      x: ARENA_WIDTH / 2,
+      y: ARENA_HEIGHT / 2,
+      vx: 0,
+      vy: 0,
+      health: maxHealth,
+      maxHealth,
+      targetPlayerId: null,
+      fireCooldown: BOSS_FIRE_INTERVAL,
+    }
+  }
+
+  private updateBoss(now: number): void {
+    if (!this.boss) return
+
+    const livingPlayers = this.room.players
+      .map((player) => ({ player, state: this.playerStates.get(player.id) }))
+      .filter((entry): entry is { player: Player; state: DemoPlayerState } =>
+        Boolean(entry.state && !entry.state.respawnAt)
+      )
+
+    if (livingPlayers.length === 0) {
+      this.boss.vx *= 0.9
+      this.boss.vy *= 0.9
+      this.boss.x = clamp(this.boss.x + this.boss.vx, BOSS_RADIUS, ARENA_WIDTH - BOSS_RADIUS)
+      this.boss.y = clamp(this.boss.y + this.boss.vy, BOSS_RADIUS, ARENA_HEIGHT - BOSS_RADIUS)
+      return
+    }
+
+    let target = livingPlayers[0]
+    let targetDistance = Number.POSITIVE_INFINITY
+    livingPlayers.forEach((entry) => {
+      const dist = Math.hypot(entry.state.x - this.boss!.x, entry.state.y - this.boss!.y)
+      if (dist < targetDistance) {
+        target = entry
+        targetDistance = dist
+      }
+    })
+
+    this.boss.targetPlayerId = target.player.id
+    const angle = Math.atan2(target.state.y - this.boss.y, target.state.x - this.boss.x)
+    this.boss.vx = this.boss.vx * 0.92 + Math.cos(angle) * BOSS_SPEED
+    this.boss.vy = this.boss.vy * 0.92 + Math.sin(angle) * BOSS_SPEED
+    this.boss.x = clamp(this.boss.x + this.boss.vx, BOSS_RADIUS, ARENA_WIDTH - BOSS_RADIUS)
+    this.boss.y = clamp(this.boss.y + this.boss.vy, BOSS_RADIUS, ARENA_HEIGHT - BOSS_RADIUS)
+    this.boss.fireCooldown = Math.max(0, BOSS_FIRE_INTERVAL - (now - this.lastBossFireTime))
+
+    livingPlayers.forEach(({ player, state }) => {
+      const dist = Math.hypot(state.x - this.boss!.x, state.y - this.boss!.y)
+      if (dist < BOSS_RADIUS + PLAYER_RADIUS && now - state.lastHazardHitTime > HAZARD_HIT_COOLDOWN) {
+        state.lastHazardHitTime = now
+        const knockbackAngle = Math.atan2(state.y - this.boss!.y, state.x - this.boss!.x)
+        state.vx = Math.cos(knockbackAngle) * 10
+        state.vy = Math.sin(knockbackAngle) * 10
+        state.x = clamp(state.x + Math.cos(knockbackAngle) * 36, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+        state.y = clamp(state.y + Math.sin(knockbackAngle) * 36, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
+        this.damagePlayer(player.id, state, BOSS_CONTACT_DAMAGE, now, this.boss!.id)
+      }
+    })
+
+    if (now - this.lastBossFireTime >= BOSS_FIRE_INTERVAL && targetDistance < 760) {
+      this.lastBossFireTime = now
+      const projectileId = `boss-shot-${now}-${Math.random().toString(36).slice(2, 6)}`
+      this.projectiles.push({
+        id: projectileId,
+        x: this.boss.x,
+        y: this.boss.y,
+        vx: Math.cos(angle) * BOSS_PROJECTILE_SPEED,
+        vy: Math.sin(angle) * BOSS_PROJECTILE_SPEED,
+        radius: BOSS_PROJECTILE_RADIUS,
+        damage: BOSS_PROJECTILE_DAMAGE,
+        ownerId: this.boss.id,
+        type: "boss",
+        expiresAt: now + PROJECTILE_LIFETIME,
+      })
+    }
+  }
+
+  private updateProjectiles(now: number): void {
+    this.projectiles = this.projectiles.filter((projectile) => {
+      projectile.x += projectile.vx
+      projectile.y += projectile.vy
+
+      if (
+        now >= projectile.expiresAt ||
+        projectile.x < -50 ||
+        projectile.x > ARENA_WIDTH + 50 ||
+        projectile.y < -50 ||
+        projectile.y > ARENA_HEIGHT + 50
+      ) {
+        return false
+      }
+
+      for (const player of this.room.players) {
+        const state = this.playerStates.get(player.id)
+        if (!state || state.respawnAt || now < state.shieldUntil || now < state.respawnInvulnerableUntil) continue
+
+        const dist = Math.hypot(projectile.x - state.x, projectile.y - state.y)
+        if (dist < projectile.radius + PLAYER_RADIUS) {
+          const angle = Math.atan2(state.y - projectile.y, state.x - projectile.x)
+          state.vx = Math.cos(angle) * 9
+          state.vy = Math.sin(angle) * 9
+          this.damagePlayer(player.id, state, projectile.damage, now, projectile.ownerId)
+          return false
+        }
+      }
+
+      return true
+    })
+  }
+
+  private updateHazards(): void {
+    this.hazards.forEach((hazard) => {
+      if (hazard.type !== "moving") return
+
+      hazard.x += hazard.vx || 0
+      hazard.y += hazard.vy || 0
+
+      if (hazard.patternStartX !== undefined && hazard.patternEndX !== undefined) {
+        if (hazard.x <= hazard.patternStartX || hazard.x + hazard.width >= hazard.patternEndX) {
+          hazard.vx = -(hazard.vx || 0)
+        }
+      }
+
+      if (hazard.patternStartY !== undefined && hazard.patternEndY !== undefined) {
+        if (hazard.y <= hazard.patternStartY || hazard.y + hazard.height >= hazard.patternEndY) {
+          hazard.vy = -(hazard.vy || 0)
+        }
+      }
+    })
+  }
+
+  private applyHazardCollisions(playerId: string, state: DemoPlayerState, now: number): void {
+    if (
+      state.respawnAt ||
+      now < state.respawnInvulnerableUntil ||
+      now < state.shieldUntil ||
+      now - state.lastHazardHitTime < HAZARD_HIT_COOLDOWN
+    ) {
+      return
+    }
+
+    const hazard = this.hazards.find((candidate) =>
+      circleRectCollide(
+        state.x,
+        state.y,
+        PLAYER_RADIUS,
+        candidate.x,
+        candidate.y,
+        candidate.width,
+        candidate.height
+      )
+    )
+
+    if (!hazard) return
+
+    state.lastHazardHitTime = now
+
+    const hazardCenterX = hazard.x + hazard.width / 2
+    const hazardCenterY = hazard.y + hazard.height / 2
+    const angle = Math.atan2(state.y - hazardCenterY, state.x - hazardCenterX)
+    state.vx = Math.cos(angle) * 8
+    state.vy = Math.sin(angle) * 8
+    state.x = clamp(state.x + Math.cos(angle) * 24, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+    state.y = clamp(state.y + Math.sin(angle) * 24, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
+    this.damagePlayer(playerId, state, HAZARD_DAMAGE, now, "hazard")
+  }
+
+  private damagePlayer(playerId: string, state: DemoPlayerState, damage: number, now: number, attackerId: string): void {
+    if (state.respawnAt || now < state.shieldUntil || now < state.respawnInvulnerableUntil) return
+
+    state.health = Math.max(0, state.health - damage)
+    this.messageHandler({
+      type: "player_hit",
+      attackerId,
+      targetId: playerId,
+      damage,
+    })
+
+    if (state.health <= 0) {
+      this.startRespawn(state, now)
+    }
+  }
+
+  private startRespawn(state: DemoPlayerState, now: number): void {
+    state.health = 0
+    state.vx = 0
+    state.vy = 0
+    state.isDashing = false
+    state.dashEndTime = 0
+    state.boostUntil = 0
+    state.shieldUntil = 0
+    state.respawnAt = now + RESPAWN_DELAY
+    state.respawnInvulnerableUntil = 0
+    state.score = Math.max(0, state.score - 50)
+  }
+
+  private finishRespawn(state: DemoPlayerState, now: number): void {
+    state.health = 100
+    state.x = ARENA_WIDTH / 2 + (Math.random() - 0.5) * 220
+    state.y = ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 220
+    state.vx = 0
+    state.vy = 0
+    state.isDashing = false
+    state.dashEndTime = 0
+    state.boostUntil = 0
+    state.shieldUntil = 0
+    state.respawnAt = null
+    state.respawnInvulnerableUntil = now + RESPAWN_INVULNERABILITY
+  }
+
+  resetToLobby(): void {
+    this.stopGameLoop()
+    this.room.state = "lobby"
+    this.gameStartTime = null
+    this.playerStates.clear()
+    this.gamePickups = []
+    this.hazards = []
+    this.projectiles = []
+    this.boss = null
+    this.lastBossFireTime = 0
+    this.currentInput = {
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      dash: false,
+      ability: false,
+    }
+
+    this.room.players.forEach((player) => {
+      player.isReady = false
+      player.score = 0
+      player.health = 100
+      player.vx = 0
+      player.vy = 0
+      player.isInvulnerable = false
+      player.isRespawning = false
+      player.respawnAt = undefined
+      player.dashCooldown = 0
+      player.abilityCooldown = 0
+    })
+
+    isGameRunning = false
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
   }
   
   // AI state tracking (persistent per bot)
