@@ -17,8 +17,38 @@ import {
   getGameClient,
   getGameClientPlayerId,
 } from "@/lib/party/session-client"
-import type { ServerMessage, GameState, InputState } from "@/types/game"
+import {
+  playGameSound,
+  primeGameAudio,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+  type GameSound,
+} from "@/lib/game/audio"
+import type { ServerMessage, GameState, InputState, PickupType } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
+
+function getPickupSound(type: PickupType | undefined): GameSound {
+  switch (type) {
+    case "energy":
+      return "pickup"
+    case "boost":
+      return "boost"
+    case "shield":
+      return "shield"
+    case "freeze":
+      return "freeze"
+    case "burn":
+      return "burn"
+    case "bomb":
+      return "bomb"
+    case "heal":
+      return "heal"
+    case "maxHealth":
+      return "maxHealth"
+    default:
+      return "powerup"
+  }
+}
 
 export default function GamePage({ params }: { params: Promise<{ roomId: string }> }) {
   const { roomId } = use(params)
@@ -44,6 +74,14 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   const [countdownStartTime, setCountdownStartTime] = useState(0)
   const [combatNotices, setCombatNotices] = useState<CombatNotice[]>([])
   const sequenceNumberRef = useRef(0)
+  const lastRespawnSecondRef = useRef<number | null>(null)
+  const wasRespawningRef = useRef(false)
+
+  const playSound = useCallback((sound: GameSound) => {
+    if (useGameStore.getState().settings.soundEnabled) {
+      playGameSound(sound)
+    }
+  }, [])
 
   const getAttackerName = useCallback((attackerId: string) => {
     const latestState = useGameStore.getState().gameState
@@ -85,16 +123,38 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
       case "countdown_start":
         setCountdownStartTime(message.startTime)
         setShowCountdown(true)
+        playSound("countdown")
         break
       case "game_state":
+        if (playerId) {
+          const activePlayer = message.state.players.find((player) => player.id === playerId)
+          if (activePlayer?.isRespawning && activePlayer.respawnAt) {
+            const respawnSeconds = Math.max(0, Math.ceil((activePlayer.respawnAt - Date.now()) / 1000))
+            if (respawnSeconds > 0 && respawnSeconds !== lastRespawnSecondRef.current) {
+              playSound("respawnTick")
+              lastRespawnSecondRef.current = respawnSeconds
+            }
+            wasRespawningRef.current = true
+          } else {
+            if (wasRespawningRef.current) {
+              playSound("respawn")
+            }
+            wasRespawningRef.current = false
+            lastRespawnSecondRef.current = null
+          }
+        }
         setGameState(message.state)
         break
       case "player_hit":
         if (message.targetId === playerId) {
+          playSound("hit")
           pushCombatNotice(`${getAttackerName(message.attackerId)} hit you for ${message.damage}`)
         }
         break
       case "pickup_collected":
+        if (message.playerId === playerId) {
+          playSound(getPickupSound(message.pickupType))
+        }
         break
       case "match_end":
         setFinalScores(message.finalScores)
@@ -104,7 +164,20 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         toast.error(message.message)
         break
     }
-  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName, pushCombatNotice])
+  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName, pushCombatNotice, playSound])
+
+  useEffect(() => {
+    primeGameAudio()
+    if (settings.musicEnabled) {
+      startBackgroundMusic()
+    } else {
+      stopBackgroundMusic()
+    }
+
+    return () => {
+      stopBackgroundMusic()
+    }
+  }, [settings.musicEnabled])
 
   // Connect using demo client
   useEffect(() => {

@@ -58,13 +58,18 @@ const BURN_TICK_INTERVAL = 1000 // ms
 const BOMB_FUSE = 1500 // ms
 const BOMB_RADIUS = 160
 const BOMB_DAMAGE = 45
-const PICKUP_RESPAWN_DELAY = 5000 // ms
+const PICKUP_RESPAWN_DELAY = 7500 // ms
+const SUPPORT_PICKUP_RESPAWN_DELAY = 10500 // ms
+const POWER_PICKUP_RESPAWN_DELAY = 14000 // ms
+const MAX_HEALTH_PICKUP_RESPAWN_DELAY = 18000 // ms
+const PICKUP_SAFE_SPAWN_MARGIN = 85
 const HAZARD_DAMAGE = 12
 const HAZARD_HIT_COOLDOWN = 700 // ms
 const RESPAWN_DELAY = 2000 // ms
 const RESPAWN_INVULNERABILITY = 1200 // ms
 const DEATH_SCORE_PENALTY = 200
 const MAX_BOTS = 7
+const BOSS_KILL_REWARD = 450
 const BOSS_SPEED = 0.5
 const BOSS_MAX_SPEED = 1.35
 const BOSS_RADIUS = 48
@@ -87,7 +92,7 @@ const ROUND_SPEED_SCALE = 0.14
 const STORM_START_PROGRESS = 0.42
 const STORM_END_PROGRESS = 0.96
 const STORM_FINAL_RADIUS = 245
-const STORM_DAMAGE = 6
+const STORM_DAMAGE = 10
 const STORM_HIT_COOLDOWN = 1000
 
 const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
@@ -104,20 +109,50 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+function getRandomSpecialPickupType(): Pickup["type"] {
+  const roll = Math.random()
+  if (roll < 0.34) return "freeze"
+  if (roll < 0.67) return "burn"
+  return "bomb"
+}
+
+function shouldRotatePickupType(pickup: Pickup): boolean {
+  return pickup.id === "p9" || pickup.id === "p10"
+}
+
+function rotatePickupType(pickup: Pickup): void {
+  if (shouldRotatePickupType(pickup)) {
+    pickup.type = getRandomSpecialPickupType()
+  }
+}
+
+function getPickupRespawnDelay(type: Pickup["type"]): number {
+  switch (type) {
+    case "energy":
+      return PICKUP_RESPAWN_DELAY
+    case "boost":
+    case "shield":
+    case "heal":
+      return SUPPORT_PICKUP_RESPAWN_DELAY
+    case "maxHealth":
+      return MAX_HEALTH_PICKUP_RESPAWN_DELAY
+    default:
+      return POWER_PICKUP_RESPAWN_DELAY
+  }
+}
+
 function createDemoPickups(): Pickup[] {
   return [
     { id: "p1", type: "energy", x: 150, y: 150, collected: false },
     { id: "p2", type: "energy", x: ARENA_WIDTH - 150, y: 150, collected: false },
-    { id: "p3", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 + 180, collected: false },
-    { id: "p4", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
-    { id: "p5", type: "energy", x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
+    { id: "p3", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
+    { id: "p4", type: "energy", x: ARENA_WIDTH - 150, y: ARENA_HEIGHT - 150, collected: false },
+    { id: "p5", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 + 190, collected: false },
     { id: "p6", type: "shield", x: ARENA_WIDTH / 2, y: 140, collected: false },
-    { id: "p7", type: "shield", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 140, collected: false },
-    { id: "p8", type: "freeze", x: ARENA_WIDTH / 2 - 260, y: ARENA_HEIGHT / 2, collected: false },
-    { id: "p9", type: "burn", x: ARENA_WIDTH / 2 + 260, y: ARENA_HEIGHT / 2, collected: false },
-    { id: "p10", type: "bomb", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 - 180, collected: false },
-    { id: "p11", type: "heal", x: ARENA_WIDTH / 2 - 120, y: ARENA_HEIGHT / 2 + 120, collected: false },
-    { id: "p12", type: "maxHealth", x: ARENA_WIDTH / 2 + 120, y: ARENA_HEIGHT / 2 + 120, collected: false },
+    { id: "p7", type: "heal", x: ARENA_WIDTH / 2 - 180, y: ARENA_HEIGHT / 2 + 115, collected: false },
+    { id: "p8", type: "maxHealth", x: ARENA_WIDTH / 2 + 180, y: ARENA_HEIGHT / 2 + 115, collected: false },
+    { id: "p9", type: getRandomSpecialPickupType(), x: ARENA_WIDTH / 2 - 270, y: ARENA_HEIGHT / 2, collected: false },
+    { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH / 2 + 270, y: ARENA_HEIGHT / 2, collected: false },
   ]
 }
 
@@ -663,7 +698,7 @@ export class DemoClient {
               this.boss.vy += Math.sin(angle) * 4
 
               if (this.boss.health <= 0) {
-                this.addScore(state, 350, now)
+                this.addScore(state, BOSS_KILL_REWARD, now)
                 this.boss = this.createBoss()
                 this.lastBossFireTime = now + 1500
               }
@@ -737,7 +772,7 @@ export class DemoClient {
           )
           if (dist < PLAYER_RADIUS + 20) {
             pickup.collected = true
-            pickup.respawnAt = now + PICKUP_RESPAWN_DELAY
+            pickup.respawnAt = now + getPickupRespawnDelay(pickup.type)
             const points = this.getPickupPoints(pickup.type, now)
             state.score += points
             this.applyPickupEffect(pickup.type, player.id, state, now)
@@ -758,8 +793,10 @@ export class DemoClient {
         if (pickup.collected && pickup.respawnAt && now >= pickup.respawnAt) {
           pickup.collected = false
           pickup.respawnAt = undefined
-          pickup.x = Math.random() * (ARENA_WIDTH - 200) + 100
-          pickup.y = Math.random() * (ARENA_HEIGHT - 200) + 100
+          rotatePickupType(pickup)
+          const position = this.getPickupSpawnPosition(now)
+          pickup.x = position.x
+          pickup.y = position.y
         }
       })
       
@@ -857,6 +894,35 @@ export class DemoClient {
       damage: this.scaleDamage(STORM_DAMAGE, now),
       active: true,
     }
+  }
+
+  private getPickupSpawnPosition(now: number): { x: number; y: number } {
+    const storm = this.getStormState(now)
+
+    if (storm?.active) {
+      const safeRadius = Math.max(120, storm.radius - PICKUP_SAFE_SPAWN_MARGIN)
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        const angle = Math.random() * Math.PI * 2
+        const distance = Math.sqrt(Math.random()) * safeRadius
+        const x = clamp(storm.x + Math.cos(angle) * distance, 100, ARENA_WIDTH - 100)
+        const y = clamp(storm.y + Math.sin(angle) * distance, 100, ARENA_HEIGHT - 100)
+        if (this.isPickupSpawnClear(x, y)) return { x, y }
+      }
+    }
+
+    for (let attempt = 0; attempt < 18; attempt += 1) {
+      const x = Math.random() * (ARENA_WIDTH - 200) + 100
+      const y = Math.random() * (ARENA_HEIGHT - 200) + 100
+      if (this.isPickupSpawnClear(x, y)) return { x, y }
+    }
+
+    return { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 }
+  }
+
+  private isPickupSpawnClear(x: number, y: number): boolean {
+    return !this.hazards.some((hazard) =>
+      circleRectCollide(x, y, PLAYER_RADIUS + 12, hazard.x, hazard.y, hazard.width, hazard.height)
+    )
   }
 
   private addScore(state: DemoPlayerState | undefined, base: number, now: number): number {
@@ -1134,7 +1200,7 @@ export class DemoClient {
           this.boss.health = Math.max(0, this.boss.health - this.scaleDamage(BOMB_DAMAGE, now))
           this.addScore(ownerState, 75, now)
           if (this.boss.health <= 0) {
-            this.addScore(ownerState, 350, now)
+            this.addScore(ownerState, BOSS_KILL_REWARD, now)
             this.boss = this.createBoss()
             this.lastBossFireTime = now + 1500
           }
