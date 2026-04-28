@@ -27,6 +27,7 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
   const respawnSeconds = currentPlayer?.respawnAt
     ? Math.max(0, Math.ceil((currentPlayer.respawnAt - Date.now()) / 1000))
     : 0
+  const currentMaxHealth = currentPlayer?.maxHealth ?? PLAYER.MAX_HEALTH
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -61,10 +62,10 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Health</span>
-                <span>{currentPlayer.health}/{PLAYER.MAX_HEALTH}</span>
+                <span>{currentPlayer.health}/{currentMaxHealth}</span>
               </div>
               <Progress 
-                value={(currentPlayer.health / PLAYER.MAX_HEALTH) * 100} 
+                value={(currentPlayer.health / currentMaxHealth) * 100} 
                 className="h-2"
               />
             </div>
@@ -95,6 +96,11 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode }: HUDOverlayPro
                   style={{ width: `${Math.max(0, (gameState.boss.health / gameState.boss.maxHealth) * 100)}%` }}
                 />
               </div>
+              {(gameState.meleeEnemies?.length ?? 0) > 0 && (
+                <div className="mt-1 text-[10px] uppercase tracking-wider text-orange-400">
+                  Hunters: {gameState.meleeEnemies?.length}
+                </div>
+              )}
             </div>
           )}
         </motion.div>

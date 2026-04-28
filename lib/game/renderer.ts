@@ -1,4 +1,4 @@
-import type { Player, Pickup, Hazard, Projectile, BossState, GameState, MapTheme } from "@/types/game"
+import type { Player, Pickup, Hazard, Projectile, BossState, MeleeEnemy, BombState, GameState, MapTheme } from "@/types/game"
 import { PLAYER_COLORS } from "@/types/game"
 import { ARENA, PLAYER, PICKUP, MAP_THEMES, VISUAL } from "./constants"
 
@@ -78,10 +78,12 @@ export function render(
   drawBackground(renderCtx)
   drawGrid(renderCtx)
   drawHazards(renderCtx, gameState.hazards)
+  drawBombs(renderCtx, gameState.bombs ?? [])
   drawPickups(renderCtx, gameState.pickups)
   drawProjectiles(renderCtx, gameState.projectiles ?? [])
   drawTrails(renderCtx, gameState.players)
   drawBoss(renderCtx, gameState.boss ?? null)
+  drawMeleeEnemies(renderCtx, gameState.meleeEnemies ?? [])
   drawPlayers(renderCtx, gameState.players, currentPlayerId)
   drawEffects(renderCtx, gameState.players)
 }
@@ -206,6 +208,11 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
     const color =
       pickup.type === "energy" ? "#00ffff" :
       pickup.type === "shield" ? "#00ff88" :
+      pickup.type === "freeze" ? "#7dd3ff" :
+      pickup.type === "burn" ? "#ff5a2f" :
+      pickup.type === "heal" ? "#5cff8d" :
+      pickup.type === "maxHealth" ? "#ffcf5a" :
+      pickup.type === "bomb" ? "#ffffff" :
       "#ffff00"
     ctx.ctx.shadowColor = color
     ctx.ctx.shadowBlur = 20 * pulse
@@ -226,7 +233,7 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
       ctx.ctx.quadraticCurveTo(0, size * pulse, -size * 0.7 * pulse, size * 0.45 * pulse)
       ctx.ctx.quadraticCurveTo(-size * pulse, -size * 0.4 * pulse, 0, -size * pulse)
       ctx.ctx.closePath()
-    } else {
+    } else if (pickup.type === "boost") {
       // Star shape for boost
       const spikes = 5
       for (let i = 0; i < spikes * 2; i++) {
@@ -238,10 +245,51 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
         else ctx.ctx.lineTo(px, py)
       }
       ctx.ctx.closePath()
+    } else if (pickup.type === "freeze") {
+      // Snowflake-like cross
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI * 2 * i) / 6
+        const px = Math.cos(angle) * size * pulse
+        const py = Math.sin(angle) * size * pulse
+        ctx.ctx.moveTo(0, 0)
+        ctx.ctx.lineTo(px, py)
+      }
+    } else if (pickup.type === "burn") {
+      // Flame shard
+      ctx.ctx.moveTo(0, -size * pulse)
+      ctx.ctx.bezierCurveTo(size * pulse, -size * 0.25 * pulse, size * 0.45 * pulse, size * pulse, 0, size * pulse)
+      ctx.ctx.bezierCurveTo(-size * pulse, size * 0.35 * pulse, -size * 0.35 * pulse, -size * 0.2 * pulse, 0, -size * pulse)
+      ctx.ctx.closePath()
+    } else if (pickup.type === "heal") {
+      // Medical cross
+      const arm = size * 0.38 * pulse
+      const length = size * pulse
+      ctx.ctx.rect(-arm, -length, arm * 2, length * 2)
+      ctx.ctx.rect(-length, -arm, length * 2, arm * 2)
+    } else if (pickup.type === "maxHealth") {
+      // Fortified health hex
+      const sides = 6
+      for (let i = 0; i < sides; i++) {
+        const angle = (Math.PI * 2 * i) / sides - Math.PI / 2
+        const px = Math.cos(angle) * size * pulse
+        const py = Math.sin(angle) * size * pulse
+        if (i === 0) ctx.ctx.moveTo(px, py)
+        else ctx.ctx.lineTo(px, py)
+      }
+      ctx.ctx.closePath()
+    } else {
+      // Bomb orb
+      ctx.ctx.arc(0, 0, size * 0.85 * pulse, 0, Math.PI * 2)
     }
 
-    ctx.ctx.fillStyle = color
-    ctx.ctx.fill()
+    if (pickup.type === "freeze") {
+      ctx.ctx.strokeStyle = color
+      ctx.ctx.lineWidth = 4 * ctx.scale
+      ctx.ctx.stroke()
+    } else {
+      ctx.ctx.fillStyle = color
+      ctx.ctx.fill()
+    }
 
     ctx.ctx.restore()
     ctx.ctx.shadowBlur = 0
@@ -254,11 +302,12 @@ function drawProjectiles(ctx: RenderContext, projectiles: Projectile[]) {
     const y = ctx.offsetY + projectile.y * ctx.scale
     const radius = projectile.radius * ctx.scale
     const pulse = Math.sin(ctx.time * 0.01 + projectile.x) * 0.2 + 0.8
+    const color = projectile.type === "bomb" ? "#ffffff" : "#ff3c78"
 
     ctx.ctx.beginPath()
     ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
-    ctx.ctx.fillStyle = `rgba(255, 80, 120, ${0.75 * pulse})`
-    ctx.ctx.shadowColor = "#ff3c78"
+    ctx.ctx.fillStyle = projectile.type === "bomb" ? `rgba(255, 255, 255, ${0.45 * pulse})` : `rgba(255, 80, 120, ${0.75 * pulse})`
+    ctx.ctx.shadowColor = color
     ctx.ctx.shadowBlur = 18
     ctx.ctx.fill()
 
@@ -266,6 +315,39 @@ function drawProjectiles(ctx: RenderContext, projectiles: Projectile[]) {
     ctx.ctx.arc(x, y, radius * 0.45, 0, Math.PI * 2)
     ctx.ctx.fillStyle = "#ffffff"
     ctx.ctx.fill()
+    ctx.ctx.shadowBlur = 0
+  })
+}
+
+function drawBombs(ctx: RenderContext, bombs: BombState[]) {
+  bombs.forEach((bomb) => {
+    const x = ctx.offsetX + bomb.x * ctx.scale
+    const y = ctx.offsetY + bomb.y * ctx.scale
+    const radius = 24 * ctx.scale
+    const fuseRemaining = Math.max(0, bomb.explodeAt - ctx.time)
+    const pulse = 1 + (1 - fuseRemaining / 1500) * 0.35
+
+    ctx.ctx.beginPath()
+    ctx.ctx.arc(x, y, bomb.radius * ctx.scale, 0, Math.PI * 2)
+    ctx.ctx.fillStyle = "rgba(255, 255, 255, 0.06)"
+    ctx.ctx.fill()
+    ctx.ctx.strokeStyle = "rgba(255, 255, 255, 0.22)"
+    ctx.ctx.lineWidth = 2
+    ctx.ctx.stroke()
+
+    ctx.ctx.save()
+    ctx.ctx.translate(x, y)
+    ctx.ctx.scale(pulse, pulse)
+    ctx.ctx.beginPath()
+    ctx.ctx.arc(0, 0, radius, 0, Math.PI * 2)
+    ctx.ctx.fillStyle = "#111111"
+    ctx.ctx.shadowColor = "#ffffff"
+    ctx.ctx.shadowBlur = 18
+    ctx.ctx.fill()
+    ctx.ctx.strokeStyle = "#ffffff"
+    ctx.ctx.lineWidth = 3
+    ctx.ctx.stroke()
+    ctx.ctx.restore()
     ctx.ctx.shadowBlur = 0
   })
 }
@@ -329,6 +411,42 @@ function drawBoss(ctx: RenderContext, boss: BossState | null) {
   ctx.ctx.shadowBlur = 4
   ctx.ctx.fillText(boss.nickname, x, y + size + 10)
   ctx.ctx.shadowBlur = 0
+}
+
+function drawMeleeEnemies(ctx: RenderContext, enemies: MeleeEnemy[]) {
+  enemies.forEach((enemy) => {
+    const x = ctx.offsetX + enemy.x * ctx.scale
+    const y = ctx.offsetY + enemy.y * ctx.scale
+    const size = enemy.radius * ctx.scale
+    const angle = Math.atan2(enemy.vy, enemy.vx)
+    const frozen = ctx.time < (enemy.freezeUntil ?? 0)
+
+    ctx.ctx.save()
+    ctx.ctx.translate(x, y)
+    ctx.ctx.rotate(Number.isFinite(angle) ? angle : 0)
+    ctx.ctx.shadowColor = frozen ? "#7dd3ff" : "#ff7a1a"
+    ctx.ctx.shadowBlur = 18
+    ctx.ctx.fillStyle = frozen ? "#062338" : "#2a0b00"
+    ctx.ctx.strokeStyle = frozen ? "#7dd3ff" : "#ff7a1a"
+    ctx.ctx.lineWidth = 3
+
+    ctx.ctx.beginPath()
+    ctx.ctx.moveTo(size, 0)
+    ctx.ctx.lineTo(-size * 0.65, -size * 0.72)
+    ctx.ctx.lineTo(-size * 0.35, 0)
+    ctx.ctx.lineTo(-size * 0.65, size * 0.72)
+    ctx.ctx.closePath()
+    ctx.ctx.fill()
+    ctx.ctx.stroke()
+    ctx.ctx.restore()
+    ctx.ctx.shadowBlur = 0
+
+    const healthPercent = Math.max(0, enemy.health / enemy.maxHealth)
+    ctx.ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
+    ctx.ctx.fillRect(x - size, y - size - 12, size * 2, 5)
+    ctx.ctx.fillStyle = frozen ? "#7dd3ff" : "#ff7a1a"
+    ctx.ctx.fillRect(x - size, y - size - 12, size * 2 * healthPercent, 5)
+  })
 }
 
 function drawTrails(ctx: RenderContext, players: Player[]) {
@@ -445,7 +563,8 @@ function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: str
     ctx.ctx.globalAlpha = 1
 
     // Health bar (only for damaged players)
-    if (player.health < PLAYER.MAX_HEALTH) {
+    const maxHealth = player.maxHealth ?? PLAYER.MAX_HEALTH
+    if (player.health < maxHealth) {
       const barWidth = size * 2
       const barHeight = 6
       const barX = x - barWidth / 2
@@ -456,7 +575,7 @@ function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: str
       ctx.ctx.fillRect(barX, barY, barWidth, barHeight)
 
       // Health fill
-      const healthPercent = player.health / PLAYER.MAX_HEALTH
+      const healthPercent = player.health / maxHealth
       const healthColor = healthPercent > 0.5 ? "#00ff00" : healthPercent > 0.25 ? "#ffff00" : "#ff0000"
       ctx.ctx.fillStyle = healthColor
       ctx.ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight)

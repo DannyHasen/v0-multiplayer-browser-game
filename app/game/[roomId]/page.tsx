@@ -46,8 +46,37 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
     if (attackerId === "hazard") {
       return "Arena hazard"
     }
+    if (attackerId === "burn") {
+      return "burn"
+    }
+
+    const meleeEnemy = latestState?.meleeEnemies?.find((enemy) => enemy.id === attackerId)
+    if (meleeEnemy) {
+      return meleeEnemy.nickname
+    }
 
     return latestState?.players.find((player) => player.id === attackerId)?.nickname ?? attackerId
+  }, [])
+
+  const getPickupName = useCallback((type?: string) => {
+    switch (type) {
+      case "boost":
+        return "Speed boost"
+      case "shield":
+        return "Shield"
+      case "freeze":
+        return "Freeze pulse"
+      case "burn":
+        return "Burn wave"
+      case "bomb":
+        return "Bomb"
+      case "heal":
+        return "Health pack"
+      case "maxHealth":
+        return "Max health"
+      default:
+        return "Energy"
+    }
   }, [])
 
   // Handle incoming messages
@@ -73,7 +102,10 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         break
       case "pickup_collected":
         if (message.playerId === playerId) {
-          toast.success(`+${message.points} points!`, { duration: 1000 })
+          toast.success(`${getPickupName(message.pickupType)} +${message.points}`, {
+            duration: 1200,
+            position: "bottom-center",
+          })
         }
         break
       case "match_end":
@@ -84,7 +116,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         toast.error(message.message)
         break
     }
-  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName])
+  }, [setRoom, setGameState, setFinalScores, setShowEndMatch, playerId, getAttackerName, getPickupName])
 
   // Connect using demo client
   useEffect(() => {

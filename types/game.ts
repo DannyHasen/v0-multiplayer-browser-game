@@ -9,6 +9,7 @@ export interface Player {
   vx: number
   vy: number
   health: number
+  maxHealth?: number
   score: number
   isReady: boolean
   isHost: boolean
@@ -70,6 +71,8 @@ export interface GameState {
   hazards: Hazard[]
   projectiles?: Projectile[]
   boss?: BossState | null
+  meleeEnemies?: MeleeEnemy[]
+  bombs?: BombState[]
   timeRemaining: number
   matchState: RoomState
 }
@@ -83,7 +86,7 @@ export interface Pickup {
   respawnAt?: number
 }
 
-export type PickupType = "energy" | "boost" | "shield"
+export type PickupType = "energy" | "boost" | "shield" | "freeze" | "burn" | "bomb" | "heal" | "maxHealth"
 
 export interface Hazard {
   id: string
@@ -111,7 +114,7 @@ export interface Projectile {
   radius: number
   damage: number
   ownerId: string
-  type: "boss"
+  type: "boss" | "bomb"
   expiresAt: number
 }
 
@@ -126,6 +129,30 @@ export interface BossState {
   maxHealth: number
   targetPlayerId: string | null
   fireCooldown: number
+}
+
+export interface MeleeEnemy {
+  id: string
+  nickname: string
+  x: number
+  y: number
+  vx: number
+  vy: number
+  radius: number
+  targetPlayerId: string | null
+  health: number
+  maxHealth: number
+  spawnedAt: number
+  freezeUntil?: number
+}
+
+export interface BombState {
+  id: string
+  x: number
+  y: number
+  radius: number
+  explodeAt: number
+  ownerId: string
 }
 
 export interface InputState {
@@ -161,7 +188,7 @@ export type ServerMessage =
   | { type: "countdown_start"; startTime: number }
   | { type: "game_state"; state: GameState }
   | { type: "player_hit"; attackerId: string; targetId: string; damage: number }
-  | { type: "pickup_collected"; pickupId: string; playerId: string; points: number }
+  | { type: "pickup_collected"; pickupId: string; playerId: string; points: number; pickupType?: PickupType }
   | { type: "match_end"; finalScores: { playerId: string; nickname: string; score: number; color: PlayerColor }[] }
   | { type: "error"; message: string }
 
