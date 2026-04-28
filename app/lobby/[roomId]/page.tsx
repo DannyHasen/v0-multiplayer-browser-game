@@ -17,7 +17,6 @@ import {
   fullDestroyGameClient,
   getGameClient,
   getGameClientPlayerId,
-  isRealtimeMultiplayer,
 } from "@/lib/party/session-client"
 import type { ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
@@ -260,7 +259,7 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
               maxPlayers={displayRoom.settings.maxPlayers}
             />
 
-            {isHost && displayRoom.state === "lobby" && !isRealtimeMultiplayer && (
+            {isHost && displayRoom.state === "lobby" && (
               <Button
                 variant="outline"
                 onClick={handleFillWithBots}

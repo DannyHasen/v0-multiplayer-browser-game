@@ -76,6 +76,8 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
   const sequenceNumberRef = useRef(0)
   const lastRespawnSecondRef = useRef<number | null>(null)
   const wasRespawningRef = useRef(false)
+  const previousDashInputRef = useRef(false)
+  const previousAbilityInputRef = useRef(false)
 
   const playSound = useCallback((sound: GameSound) => {
     if (useGameStore.getState().settings.soundEnabled) {
@@ -147,8 +149,10 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
         break
       case "player_hit":
         if (message.targetId === playerId) {
-          playSound("hit")
+          playSound(message.eliminated ? "death" : "hit")
           pushCombatNotice(`${getAttackerName(message.attackerId)} hit you for ${message.damage}`)
+        } else if (message.attackerId === playerId && message.eliminated) {
+          playSound("kill")
         }
         break
       case "pickup_collected":
@@ -159,6 +163,7 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
       case "match_end":
         setFinalScores(message.finalScores)
         setShowEndMatch(true)
+        playSound(message.finalScores[0]?.playerId === playerId ? "victory" : "matchEnd")
         break
       case "error":
         toast.error(message.message)
@@ -220,12 +225,23 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
 
   // Handle input changes
   const handleInput = useCallback((input: InputState) => {
+    const latestState = useGameStore.getState().gameState
+    const activePlayer = latestState?.players.find((player) => player.id === playerId)
+    if (input.dash && !previousDashInputRef.current && (activePlayer?.dashCooldown ?? 0) <= 0) {
+      playSound("dash")
+    }
+    if (input.ability && !previousAbilityInputRef.current && (activePlayer?.abilityCooldown ?? 0) <= 0) {
+      playSound("ability")
+    }
+    previousDashInputRef.current = input.dash
+    previousAbilityInputRef.current = input.ability
+
     const client = getGameClient()
     if (client?.isConnected) {
       sequenceNumberRef.current += 1
       client.sendInput(input, sequenceNumberRef.current)
     }
-  }, [])
+  }, [playerId, playSound])
 
   // Handle countdown complete
   const handleCountdownComplete = useCallback(() => {

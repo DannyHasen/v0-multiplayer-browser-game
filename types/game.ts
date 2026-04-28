@@ -187,6 +187,7 @@ export type ClientMessage =
   | { type: "ready" }
   | { type: "settings"; settings: Partial<RoomSettings> }
   | { type: "start" }
+  | { type: "fill_bots" }
   | { type: "input"; input: InputState; sequenceNumber: number }
   | { type: "reset" }
   | { type: "leave" }
@@ -199,7 +200,7 @@ export type ServerMessage =
   | { type: "player_ready"; playerId: string; isReady: boolean }
   | { type: "countdown_start"; startTime: number }
   | { type: "game_state"; state: GameState }
-  | { type: "player_hit"; attackerId: string; targetId: string; damage: number }
+  | { type: "player_hit"; attackerId: string; targetId: string; damage: number; eliminated?: boolean }
   | { type: "pickup_collected"; pickupId: string; playerId: string; points: number; pickupType?: PickupType }
   | { type: "match_end"; finalScores: { playerId: string; nickname: string; score: number; color: PlayerColor }[] }
   | { type: "error"; message: string }
@@ -236,8 +237,11 @@ export type SoundEffect =
   | "heal"
   | "maxHealth"
   | "hit"
+  | "kill"
+  | "death"
   | "respawnTick"
   | "respawn"
   | "countdown"
+  | "victory"
   | "matchStart"
   | "matchEnd"

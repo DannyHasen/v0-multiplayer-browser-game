@@ -1402,14 +1402,15 @@ export class DemoClient {
 
     const scaledDamage = this.scaleDamage(damage, now)
     state.health = Math.max(0, state.health - scaledDamage)
+    const eliminated = state.health <= 0
     this.messageHandler({
       type: "player_hit",
       attackerId,
       targetId: playerId,
       damage: scaledDamage,
+      eliminated,
     })
 
-    const eliminated = state.health <= 0
     if (eliminated) {
       this.startRespawn(state, now)
     }

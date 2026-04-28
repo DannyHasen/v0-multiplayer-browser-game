@@ -50,6 +50,7 @@ const HAZARD_HIT_COOLDOWN = 700
 const RESPAWN_DELAY = 2000
 const RESPAWN_INVULNERABILITY = 1200
 const DEATH_SCORE_PENALTY = 200
+const MAX_BOTS = 7
 const BOSS_KILL_REWARD = 450
 const BOSS_SPEED = 0.5
 const BOSS_MAX_SPEED = 1.35
@@ -79,6 +80,16 @@ const MATCH_DEFAULT_DURATION = 180
 const COUNTDOWN_SECONDS = 3
 const TICK_RATE = 60
 
+const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
+  { nickname: "NeonBot", color: "magenta" },
+  { nickname: "CyberAce", color: "yellow" },
+  { nickname: "PixelPunk", color: "lime" },
+  { nickname: "ByteRider", color: "orange" },
+  { nickname: "GlitchKid", color: "pink" },
+  { nickname: "TurboTess", color: "teal" },
+  { nickname: "NovaNode", color: "purple" },
+]
+
 type DemoPlayerState = {
   x: number
   y: number
@@ -107,6 +118,17 @@ type DamageResult = {
   damaged: boolean
   eliminated: boolean
   amount: number
+}
+
+type AIBehaviorMode = "wander" | "collect" | "harass" | "avoid" | "ambush"
+
+type AITarget = {
+  x: number
+  y: number
+  changeAt: number
+  mode: AIBehaviorMode
+  targetId?: string
+  pickupId?: string
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -252,6 +274,7 @@ export default class GameServer implements Party.Server {
   boss: BossState | null = null
   meleeEnemies: MeleeEnemy[] = []
   bombs: BombState[] = []
+  aiTargets: Map<string, AITarget> = new Map()
   gameStartTime: number | null = null
   lastBossFireTime = 0
 
@@ -293,6 +316,9 @@ export default class GameServer implements Party.Server {
           break
         case "start":
           this.handleStart(sender)
+          break
+        case "fill_bots":
+          this.handleFillWithBots(sender)
           break
         case "input":
           this.handleInput(sender, data.input)
@@ -362,14 +388,80 @@ export default class GameServer implements Party.Server {
   handleSettings(conn: Party.Connection, settings: Partial<RoomSettings>) {
     if (conn.id !== this.room.hostId || this.room.state !== "lobby") return
 
+    const humanCount = this.room.players.filter((player) => !this.isBot(player.id)).length
     this.room.settings = {
       ...this.room.settings,
       ...settings,
       maxPlayers: settings.maxPlayers
-        ? clamp(settings.maxPlayers, Math.max(2, this.room.players.length), 8)
+        ? clamp(settings.maxPlayers, Math.max(2, humanCount), 8)
         : this.room.settings.maxPlayers,
     }
+    this.trimBotsToMaxPlayers()
     this.broadcast({ type: "room_state", room: this.room })
+  }
+
+  handleFillWithBots(conn: Party.Connection) {
+    if (conn.id !== this.room.hostId || this.room.state !== "lobby") return
+
+    const addedPlayers: Player[] = []
+    while (this.room.players.length < this.room.settings.maxPlayers && this.getBotCount() < MAX_BOTS) {
+      const bot = this.createBot()
+      if (!bot) break
+      this.room.players.push(bot)
+      addedPlayers.push(bot)
+    }
+
+    addedPlayers.forEach((player) => {
+      this.broadcast({ type: "player_joined", player })
+    })
+    this.broadcast({ type: "room_state", room: this.room })
+  }
+
+  createBot(): Player | null {
+    const nextBotIndex = this.getNextBotIndex()
+    if (nextBotIndex === -1) return null
+
+    const profile = BOT_PROFILES[nextBotIndex]
+    const botNumber = this.getBotCount()
+    const bot = createPlayer(
+      `bot-${profile.nickname.toLowerCase()}-${this.room.id}`,
+      profile.nickname,
+      profile.color,
+      false
+    )
+
+    bot.x = 200 + (botNumber % 4) * 220
+    bot.y = 200 + Math.floor(botNumber / 4) * 180
+    bot.isReady = true
+    bot.connected = true
+
+    return bot
+  }
+
+  getBotCount(): number {
+    return this.room.players.filter((player) => this.isBot(player.id)).length
+  }
+
+  getNextBotIndex(): number {
+    return BOT_PROFILES.findIndex((profile) =>
+      !this.room.players.some((player) => player.id === `bot-${profile.nickname.toLowerCase()}-${this.room.id}`)
+    )
+  }
+
+  trimBotsToMaxPlayers() {
+    while (this.room.players.length > this.room.settings.maxPlayers) {
+      const botIndex = this.room.players.findLastIndex((player) => this.isBot(player.id))
+      if (botIndex === -1) break
+      const [removed] = this.room.players.splice(botIndex, 1)
+      this.playerInputs.delete(removed.id)
+      this.playerStates.delete(removed.id)
+      this.aiTargets.delete(removed.id)
+      this.broadcast({ type: "player_left", playerId: removed.id })
+    }
+  }
+
+  isBot(playerId: string): boolean {
+    return playerId.startsWith("bot-")
   }
 
   handleStart(conn: Party.Connection) {
@@ -420,12 +512,22 @@ export default class GameServer implements Party.Server {
     this.room.players = this.room.players.filter((player) => player.id !== playerId)
     this.playerInputs.delete(playerId)
     this.playerStates.delete(playerId)
+    this.aiTargets.delete(playerId)
 
     if (beforeCount === this.room.players.length) return
 
-    if (this.room.hostId === playerId && this.room.players.length > 0) {
-      this.room.hostId = this.room.players[0].id
-      this.room.players[0].isHost = true
+    const humanPlayers = this.room.players.filter((player) => !this.isBot(player.id))
+    if (humanPlayers.length === 0) {
+      this.stopGameLoop()
+      this.resetRuntimeState()
+      this.room.players = []
+      this.room.state = "lobby"
+      this.room.hostId = ""
+    } else if (this.room.hostId === playerId) {
+      this.room.hostId = humanPlayers[0].id
+      this.room.players.forEach((player) => {
+        player.isHost = player.id === this.room.hostId
+      })
     }
 
     if (this.room.players.length === 0) {
@@ -452,6 +554,7 @@ export default class GameServer implements Party.Server {
     this.boss = this.createBoss()
     this.meleeEnemies = []
     this.bombs = []
+    this.aiTargets.clear()
     this.lastBossFireTime = Date.now()
 
     this.gameLoopInterval = setInterval(() => {
@@ -515,7 +618,7 @@ export default class GameServer implements Party.Server {
     this.updateProjectiles(now)
     this.updateBombs(now)
 
-    this.room.players.forEach((player) => {
+    this.room.players.forEach((player, index) => {
       const state = this.playerStates.get(player.id)
       if (!state) return
 
@@ -532,7 +635,11 @@ export default class GameServer implements Party.Server {
       this.applyBurnTick(player.id, state, now)
       if (state.respawnAt) return
 
-      const input = now < state.freezeUntil ? getEmptyInput() : this.playerInputs.get(player.id) ?? getEmptyInput()
+      const input = now < state.freezeUntil
+        ? getEmptyInput()
+        : this.isBot(player.id)
+          ? this.getAIInput(player.id, index, now)
+          : this.playerInputs.get(player.id) ?? getEmptyInput()
       let speed = now < state.boostUntil ? PLAYER_SPEED * BOOST_MULTIPLIER : PLAYER_SPEED
 
       if (state.isDashing && now < state.dashEndTime) {
@@ -1250,14 +1357,15 @@ export default class GameServer implements Party.Server {
 
     const scaledDamage = this.scaleDamage(damage, now)
     state.health = Math.max(0, state.health - scaledDamage)
+    const eliminated = state.health <= 0
     this.broadcast({
       type: "player_hit",
       attackerId,
       targetId: playerId,
       damage: scaledDamage,
+      eliminated,
     })
 
-    const eliminated = state.health <= 0
     if (eliminated) {
       this.startRespawn(state, now)
     }
@@ -1307,6 +1415,288 @@ export default class GameServer implements Party.Server {
       .filter((entry): entry is { player: Player; state: DemoPlayerState } =>
         Boolean(entry.state && !entry.state.respawnAt)
       )
+  }
+
+  getAIDangerTarget(state: DemoPlayerState, now: number): { x: number; y: number; urgency: number } | null {
+    let fleeX = 0
+    let fleeY = 0
+    let urgency = 0
+
+    const addDanger = (x: number, y: number, range: number, weight: number) => {
+      const dx = state.x - x
+      const dy = state.y - y
+      const distance = Math.max(1, Math.hypot(dx, dy))
+      if (distance > range) return
+
+      const threat = (1 - distance / range) * weight
+      fleeX += (dx / distance) * threat
+      fleeY += (dy / distance) * threat
+      urgency = Math.max(urgency, threat)
+    }
+
+    if (this.boss) {
+      addDanger(this.boss.x, this.boss.y, BOSS_RADIUS + 250, 1.1)
+    }
+
+    this.meleeEnemies.forEach((enemy) => {
+      addDanger(enemy.x, enemy.y, enemy.radius + 220, 1.4)
+    })
+
+    this.bombs.forEach((bomb) => {
+      addDanger(bomb.x, bomb.y, bomb.radius + 120, 1.6)
+    })
+
+    this.projectiles.forEach((projectile) => {
+      addDanger(
+        projectile.x + projectile.vx * 8,
+        projectile.y + projectile.vy * 8,
+        projectile.radius + 130,
+        1.25
+      )
+    })
+
+    this.hazards.forEach((hazard) => {
+      addDanger(
+        hazard.x + hazard.width / 2,
+        hazard.y + hazard.height / 2,
+        Math.max(hazard.width, hazard.height) + 95,
+        0.8
+      )
+    })
+
+    const storm = this.getStormState(now)
+    if (storm) {
+      const stormDx = state.x - storm.x
+      const stormDy = state.y - storm.y
+      const stormDistance = Math.max(1, Math.hypot(stormDx, stormDy))
+      if (stormDistance > storm.radius - 120) {
+        addDanger(
+          storm.x + (stormDx / stormDistance) * storm.radius,
+          storm.y + (stormDy / stormDistance) * storm.radius,
+          210,
+          1.5
+        )
+      }
+    }
+
+    const fleeLength = Math.hypot(fleeX, fleeY)
+    if (fleeLength < 0.05) return null
+
+    const escapeDistance = 170 + urgency * 130
+    return {
+      x: clamp(state.x + (fleeX / fleeLength) * escapeDistance, 70, ARENA_WIDTH - 70),
+      y: clamp(state.y + (fleeY / fleeLength) * escapeDistance, 70, ARENA_HEIGHT - 70),
+      urgency,
+    }
+  }
+
+  getBestAIPickup(state: DemoPlayerState, personality: number): Pickup | null {
+    let bestPickup: Pickup | null = null
+    let bestScore = Number.NEGATIVE_INFINITY
+
+    this.gamePickups.forEach((pickup) => {
+      if (pickup.collected) return
+
+      const distance = Math.hypot(pickup.x - state.x, pickup.y - state.y)
+      let value = -distance / 18
+
+      switch (pickup.type) {
+        case "heal":
+          value += state.health < state.maxHealth * 0.7 ? 85 : 8
+          break
+        case "maxHealth":
+          value += state.maxHealth < MAX_HEALTH_CAP ? 62 : 6
+          break
+        case "shield":
+          value += state.health < state.maxHealth * 0.55 ? 45 : 24
+          break
+        case "freeze":
+        case "burn":
+        case "bomb":
+          value += personality === 0 ? 44 : 34
+          break
+        case "boost":
+          value += personality === 1 ? 38 : 28
+          break
+        default:
+          value += 20
+      }
+
+      if (value > bestScore) {
+        bestScore = value
+        bestPickup = pickup
+      }
+    })
+
+    return bestPickup
+  }
+
+  getAIPlayerTarget(playerId: string, state: DemoPlayerState): { player: Player; state: DemoPlayerState } | null {
+    const candidates = this.getLivingPlayerEntries(playerId)
+    if (candidates.length === 0) return null
+
+    const leader = [...candidates].sort((a, b) => b.state.score - a.state.score)[0]
+    const nearest = candidates.reduce((best, candidate) => {
+      const bestDistance = Math.hypot(best.state.x - state.x, best.state.y - state.y)
+      const candidateDistance = Math.hypot(candidate.state.x - state.x, candidate.state.y - state.y)
+      return candidateDistance < bestDistance ? candidate : best
+    }, candidates[0])
+    const human = candidates.find((candidate) => !this.isBot(candidate.player.id))
+
+    const roll = Math.random()
+    if (leader && roll < 0.36) return leader
+    if (nearest && roll < 0.7) return nearest
+    if (human && roll < 0.84) return human
+
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  }
+
+  chooseAITarget(playerId: string, index: number, state: DemoPlayerState, now: number): AITarget {
+    const personality = index % 4
+    const pickup = this.getBestAIPickup(state, personality)
+    const lowHealth = state.health < state.maxHealth * 0.62
+
+    let mode: AIBehaviorMode = "wander"
+    const roll = Math.random()
+
+    if (pickup && (lowHealth || roll < [0.26, 0.58, 0.34, 0.42][personality])) {
+      mode = "collect"
+    } else if (roll < [0.46, 0.18, 0.28, 0.22][personality]) {
+      mode = "harass"
+    } else if (roll < [0.64, 0.36, 0.62, 0.48][personality]) {
+      mode = "ambush"
+    }
+
+    if (mode === "collect" && pickup) {
+      return {
+        x: pickup.x,
+        y: pickup.y,
+        changeAt: now + 1800 + Math.random() * 1200,
+        mode,
+        pickupId: pickup.id,
+      }
+    }
+
+    if (mode === "harass" || mode === "ambush") {
+      const target = this.getAIPlayerTarget(playerId, state)
+      if (target) {
+        const offsetAngle = (index + 1) * 1.73 + Math.random() * 0.6
+        const offsetDistance = mode === "ambush" ? 145 : 78
+        return {
+          x: clamp(target.state.x + Math.cos(offsetAngle) * offsetDistance, 70, ARENA_WIDTH - 70),
+          y: clamp(target.state.y + Math.sin(offsetAngle) * offsetDistance, 70, ARENA_HEIGHT - 70),
+          changeAt: now + (mode === "ambush" ? 2300 : 1600) + Math.random() * 1300,
+          mode,
+          targetId: target.player.id,
+        }
+      }
+    }
+
+    return {
+      x: Math.random() * (ARENA_WIDTH - 220) + 110,
+      y: Math.random() * (ARENA_HEIGHT - 220) + 110,
+      changeAt: now + 2600 + Math.random() * 2600,
+      mode: "wander",
+    }
+  }
+
+  resolveAITarget(target: AITarget, index: number, now: number): { x: number; y: number } {
+    if (target.pickupId) {
+      const pickup = this.gamePickups.find((candidate) => candidate.id === target.pickupId && !candidate.collected)
+      if (pickup) return { x: pickup.x, y: pickup.y }
+    }
+
+    if (target.targetId) {
+      const targetState = this.playerStates.get(target.targetId)
+      if (targetState && !targetState.respawnAt) {
+        const orbitAngle = (index + 1) * 1.9 + now / 1200
+        const orbitDistance = target.mode === "ambush" ? 130 : 70
+        const leadX = targetState.x + targetState.vx * 12
+        const leadY = targetState.y + targetState.vy * 12
+
+        return {
+          x: clamp(leadX + Math.cos(orbitAngle) * orbitDistance, 70, ARENA_WIDTH - 70),
+          y: clamp(leadY + Math.sin(orbitAngle) * orbitDistance, 70, ARENA_HEIGHT - 70),
+        }
+      }
+    }
+
+    return { x: target.x, y: target.y }
+  }
+
+  hasAIAttackTargetNearby(playerId: string, state: DemoPlayerState): boolean {
+    const closePlayer = this.getLivingPlayerEntries(playerId).some(({ state: otherState }) =>
+      Math.hypot(otherState.x - state.x, otherState.y - state.y) < SHOCKWAVE_RADIUS * 0.9
+    )
+    const closeBoss = Boolean(
+      this.boss && Math.hypot(this.boss.x - state.x, this.boss.y - state.y) < SHOCKWAVE_RADIUS + BOSS_RADIUS
+    )
+    const closeHunter = this.meleeEnemies.some((enemy) =>
+      Math.hypot(enemy.x - state.x, enemy.y - state.y) < SHOCKWAVE_RADIUS + enemy.radius
+    )
+
+    return closePlayer || closeBoss || closeHunter
+  }
+
+  getAIInput(playerId: string, index: number, now: number): InputState {
+    const state = this.playerStates.get(playerId)
+    if (!state) return getEmptyInput()
+
+    const dangerTarget = this.getAIDangerTarget(state, now)
+    let aiTarget = this.aiTargets.get(playerId)
+    const targetReached = aiTarget ? Math.hypot(aiTarget.x - state.x, aiTarget.y - state.y) < 34 : false
+    const pickupUnavailable = Boolean(
+      aiTarget?.pickupId && !this.gamePickups.some((pickup) => pickup.id === aiTarget?.pickupId && !pickup.collected)
+    )
+
+    if (!aiTarget || now > aiTarget.changeAt || targetReached || pickupUnavailable) {
+      aiTarget = this.chooseAITarget(playerId, index, state, now)
+      this.aiTargets.set(playerId, aiTarget)
+    }
+
+    const resolvedTarget = dangerTarget ?? this.resolveAITarget(aiTarget, index, now)
+    let targetX = clamp(resolvedTarget.x, 50, ARENA_WIDTH - 50)
+    let targetY = clamp(resolvedTarget.y, 50, ARENA_HEIGHT - 50)
+    let shouldDash = false
+    let shouldAbility = false
+
+    const distanceToTarget = Math.hypot(targetX - state.x, targetY - state.y)
+    if (dangerTarget && dangerTarget.urgency > 0.62 && now - state.lastDashTime > DASH_COOLDOWN) {
+      shouldDash = true
+    } else if (
+      aiTarget.mode === "collect" &&
+      distanceToTarget > 95 &&
+      distanceToTarget < 300 &&
+      Math.random() < 0.012 &&
+      now - state.lastDashTime > DASH_COOLDOWN
+    ) {
+      shouldDash = true
+    } else if (
+      (aiTarget.mode === "harass" || aiTarget.mode === "ambush") &&
+      distanceToTarget > 160 &&
+      distanceToTarget < 340 &&
+      Math.random() < 0.008 &&
+      now - state.lastDashTime > DASH_COOLDOWN
+    ) {
+      shouldDash = true
+    }
+
+    if (now - state.lastAbilityTime > ABILITY_COOLDOWN && this.hasAIAttackTargetNearby(playerId, state)) {
+      shouldAbility = Math.random() < (aiTarget.mode === "harass" ? 0.018 : 0.01)
+    }
+
+    const dx = targetX - state.x
+    const dy = targetY - state.y
+    const deadzone = 20
+
+    return {
+      up: dy < -deadzone,
+      down: dy > deadzone,
+      left: dx < -deadzone,
+      right: dx > deadzone,
+      dash: shouldDash,
+      ability: shouldAbility,
+    }
   }
 
   endMatch() {
@@ -1370,6 +1760,7 @@ export default class GameServer implements Party.Server {
     this.boss = null
     this.meleeEnemies = []
     this.bombs = []
+    this.aiTargets.clear()
     this.gameStartTime = null
     this.lastBossFireTime = 0
   }

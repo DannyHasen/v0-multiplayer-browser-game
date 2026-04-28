@@ -9,9 +9,15 @@ export type GameSound =
   | "heal"
   | "maxHealth"
   | "hit"
+  | "kill"
+  | "death"
+  | "dash"
+  | "ability"
   | "respawnTick"
   | "respawn"
   | "countdown"
+  | "victory"
+  | "matchEnd"
 
 let audioContext: AudioContext | null = null
 let unlockListenersAttached = false
@@ -181,6 +187,26 @@ export function playGameSound(sound: GameSound): void {
       scheduleNoise(90, 0, 0.04, 650)
       scheduleTone(128, 120, 0, "sawtooth", 0.022)
       break
+    case "kill":
+      scheduleTone(220, 70, 0, "square", 0.026)
+      scheduleTone(440, 85, 60, "square", 0.028)
+      scheduleTone(880, 140, 145, "triangle", 0.032)
+      scheduleNoise(80, 40, 0.018, 2200)
+      break
+    case "death":
+      scheduleNoise(130, 0, 0.034, 520)
+      scheduleTone(196, 100, 0, "sawtooth", 0.026)
+      scheduleTone(98, 220, 95, "sawtooth", 0.022)
+      break
+    case "dash":
+      scheduleNoise(70, 0, 0.022, 2600)
+      scheduleTone(520, 65, 0, "triangle", 0.018)
+      break
+    case "ability":
+      scheduleTone(180, 90, 0, "sawtooth", 0.022)
+      scheduleTone(360, 120, 65, "triangle", 0.024)
+      scheduleTone(720, 90, 150, "triangle", 0.02)
+      break
     case "respawnTick":
       scheduleTone(420, 90, 0, "square", 0.024)
       break
@@ -194,6 +220,17 @@ export function playGameSound(sound: GameSound): void {
       scheduleTone(330, 120, 1000, "square", 0.026)
       scheduleTone(330, 120, 2000, "square", 0.026)
       scheduleTone(660, 220, 3000, "triangle", 0.035)
+      break
+    case "victory":
+      scheduleTone(392, 120, 0, "triangle", 0.028)
+      scheduleTone(523.25, 140, 120, "triangle", 0.03)
+      scheduleTone(659.25, 170, 270, "triangle", 0.032)
+      scheduleTone(1046.5, 260, 460, "sine", 0.032)
+      break
+    case "matchEnd":
+      scheduleTone(330, 140, 0, "triangle", 0.024)
+      scheduleTone(246.94, 170, 150, "triangle", 0.022)
+      scheduleTone(196, 220, 330, "sine", 0.02)
       break
   }
 }

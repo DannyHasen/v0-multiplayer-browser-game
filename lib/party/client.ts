@@ -128,7 +128,9 @@ export class PartyClient {
   }
 
   fillWithBots(): number {
-    return 0
+    const openSlots = Math.max(0, (this.room?.settings.maxPlayers ?? 8) - (this.room?.players.length ?? 0))
+    this.send({ type: "fill_bots" })
+    return openSlots
   }
 
   resetToLobby(): void {
