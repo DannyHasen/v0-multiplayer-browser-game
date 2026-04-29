@@ -16,6 +16,12 @@ export interface Player {
   dashCooldown: number
   abilityCooldown: number
   isInvulnerable: boolean
+  boostUntil?: number
+  shieldUntil?: number
+  freezeUntil?: number
+  burnUntil?: number
+  magnetUntil?: number
+  scoreMultiplierUntil?: number
   isRespawning?: boolean
   respawnAt?: number
   lastDashTime: number
@@ -71,9 +77,11 @@ export interface GameState {
   hazards: Hazard[]
   projectiles?: Projectile[]
   boss?: BossState | null
+  bosses?: BossState[]
   meleeEnemies?: MeleeEnemy[]
   bombs?: BombState[]
   storm?: StormState | null
+  arenaEvent?: ArenaEventState | null
   timeRemaining: number
   matchState: RoomState
 }
@@ -87,7 +95,17 @@ export interface Pickup {
   respawnAt?: number
 }
 
-export type PickupType = "energy" | "boost" | "shield" | "freeze" | "burn" | "bomb" | "heal" | "maxHealth"
+export type PickupType =
+  | "energy"
+  | "boost"
+  | "shield"
+  | "freeze"
+  | "burn"
+  | "bomb"
+  | "heal"
+  | "maxHealth"
+  | "magnet"
+  | "multiplier"
 
 export interface Hazard {
   id: string
@@ -165,6 +183,14 @@ export interface StormState {
   active: boolean
 }
 
+export interface ArenaEventState {
+  id: string
+  name: string
+  description: string
+  endsAt: number
+  tone: "supply" | "danger" | "warden"
+}
+
 export interface InputState {
   up: boolean
   down: boolean
@@ -236,6 +262,8 @@ export type SoundEffect =
   | "bomb"
   | "heal"
   | "maxHealth"
+  | "magnet"
+  | "multiplier"
   | "hit"
   | "kill"
   | "death"

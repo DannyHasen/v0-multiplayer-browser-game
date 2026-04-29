@@ -83,7 +83,7 @@ export function render(
   drawPickups(renderCtx, gameState.pickups)
   drawProjectiles(renderCtx, gameState.projectiles ?? [])
   drawTrails(renderCtx, gameState.players)
-  drawBoss(renderCtx, gameState.boss ?? null)
+  drawBosses(renderCtx, gameState.bosses ?? (gameState.boss ? [gameState.boss] : []))
   drawMeleeEnemies(renderCtx, gameState.meleeEnemies ?? [])
   drawPlayers(renderCtx, gameState.players, currentPlayerId)
   drawEffects(renderCtx, gameState.players)
@@ -250,6 +250,8 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
       pickup.type === "heal" ? "#5cff8d" :
       pickup.type === "maxHealth" ? "#ffcf5a" :
       pickup.type === "bomb" ? "#ffffff" :
+      pickup.type === "magnet" ? "#b56cff" :
+      pickup.type === "multiplier" ? "#ffd166" :
       "#ffff00"
     ctx.ctx.shadowColor = color
     ctx.ctx.shadowBlur = 20 * pulse
@@ -314,14 +316,26 @@ function drawPickups(ctx: RenderContext, pickups: Pickup[]) {
         else ctx.ctx.lineTo(px, py)
       }
       ctx.ctx.closePath()
+    } else if (pickup.type === "magnet") {
+      // Twin arcs for magnet pull
+      ctx.ctx.arc(-size * 0.32 * pulse, 0, size * 0.62 * pulse, Math.PI * 0.35, Math.PI * 1.65)
+      ctx.ctx.moveTo(size * 0.32 * pulse + Math.cos(Math.PI * 1.35) * size * 0.62 * pulse, Math.sin(Math.PI * 1.35) * size * 0.62 * pulse)
+      ctx.ctx.arc(size * 0.32 * pulse, 0, size * 0.62 * pulse, Math.PI * 1.35, Math.PI * 0.65, true)
+    } else if (pickup.type === "multiplier") {
+      // Score multiplier X
+      ctx.ctx.moveTo(-size * pulse, -size * 0.55 * pulse)
+      ctx.ctx.lineTo(size * pulse, size * 0.55 * pulse)
+      ctx.ctx.moveTo(size * pulse, -size * 0.55 * pulse)
+      ctx.ctx.lineTo(-size * pulse, size * 0.55 * pulse)
     } else {
       // Bomb orb
       ctx.ctx.arc(0, 0, size * 0.85 * pulse, 0, Math.PI * 2)
     }
 
-    if (pickup.type === "freeze") {
+    if (pickup.type === "freeze" || pickup.type === "magnet" || pickup.type === "multiplier") {
       ctx.ctx.strokeStyle = color
       ctx.ctx.lineWidth = 4 * ctx.scale
+      ctx.ctx.lineCap = "round"
       ctx.ctx.stroke()
     } else {
       ctx.ctx.fillStyle = color
@@ -387,6 +401,10 @@ function drawBombs(ctx: RenderContext, bombs: BombState[]) {
     ctx.ctx.restore()
     ctx.ctx.shadowBlur = 0
   })
+}
+
+function drawBosses(ctx: RenderContext, bosses: BossState[]) {
+  bosses.forEach((boss) => drawBoss(ctx, boss))
 }
 
 function drawBoss(ctx: RenderContext, boss: BossState | null) {

@@ -13,6 +13,7 @@ import type {
   MeleeEnemy,
   BombState,
   StormState,
+  ArenaEventState,
 } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
@@ -58,6 +59,11 @@ const BURN_TICK_INTERVAL = 1000 // ms
 const BOMB_FUSE = 1500 // ms
 const BOMB_RADIUS = 160
 const BOMB_DAMAGE = 45
+const MAGNET_DURATION = 6500 // ms
+const MAGNET_RADIUS = 250
+const MAGNET_PULL_SPEED = 9
+const SCORE_MULTIPLIER_DURATION = 8000 // ms
+const SCORE_MULTIPLIER = 1.6
 const PICKUP_RESPAWN_DELAY = 7500 // ms
 const SUPPORT_PICKUP_RESPAWN_DELAY = 10500 // ms
 const POWER_PICKUP_RESPAWN_DELAY = 14000 // ms
@@ -70,6 +76,8 @@ const RESPAWN_INVULNERABILITY = 1200 // ms
 const DEATH_SCORE_PENALTY = 200
 const MAX_BOTS = 7
 const BOSS_KILL_REWARD = 450
+const MIN_BOSS_COUNT = 2
+const MAX_BOSS_COUNT = 4
 const BOSS_SPEED = 0.5
 const BOSS_MAX_SPEED = 1.35
 const BOSS_RADIUS = 48
@@ -94,6 +102,10 @@ const STORM_END_PROGRESS = 0.96
 const STORM_FINAL_RADIUS = 245
 const STORM_DAMAGE = 10
 const STORM_HIT_COOLDOWN = 1000
+const ARENA_EVENT_FIRST_DELAY = 30000
+const ARENA_EVENT_INTERVAL = 36000
+const ARENA_EVENT_DURATION = 9000
+const MAX_BONUS_PICKUPS = 7
 
 const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
   { nickname: "NeonBot", color: "magenta" },
@@ -153,6 +165,8 @@ function createDemoPickups(): Pickup[] {
     { id: "p8", type: "maxHealth", x: ARENA_WIDTH / 2 + 180, y: ARENA_HEIGHT / 2 + 115, collected: false },
     { id: "p9", type: getRandomSpecialPickupType(), x: ARENA_WIDTH / 2 - 270, y: ARENA_HEIGHT / 2, collected: false },
     { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH / 2 + 270, y: ARENA_HEIGHT / 2, collected: false },
+    { id: "p11", type: "magnet", x: ARENA_WIDTH / 2 - 145, y: ARENA_HEIGHT / 2 - 165, collected: false },
+    { id: "p12", type: "multiplier", x: ARENA_WIDTH / 2 + 145, y: ARENA_HEIGHT / 2 - 165, collected: false },
   ]
 }
 
@@ -223,6 +237,8 @@ type DemoPlayerState = {
   burnUntil: number
   lastBurnTick: number
   burnOwnerId: string | null
+  magnetUntil: number
+  scoreMultiplierUntil: number
   lastHazardHitTime: number
   lastStormHitTime: number
   respawnInvulnerableUntil: number
@@ -261,9 +277,14 @@ export class DemoClient {
   private hazards: Hazard[] = []
   private projectiles: Projectile[] = []
   private boss: BossState | null = null
+  private extraBosses: BossState[] = []
   private meleeEnemies: MeleeEnemy[] = []
   private bombs: BombState[] = []
   private lastBossFireTime = 0
+  private extraBossFireTimes: Map<string, number> = new Map()
+  private lastArenaEventTime = 0
+  private arenaEvent: ArenaEventState | null = null
+  private bonusPickupCounter = 0
   
   // Player input state
   private currentInput: InputState = {
@@ -526,11 +547,15 @@ export class DemoClient {
     if (this.hazards.length === 0) {
       this.hazards = createDemoHazards()
     }
+    const now = Date.now()
     if (!this.boss) {
-      this.boss = this.createBoss()
+      this.boss = this.createBoss(0, now)
+      this.lastBossFireTime = now + 600
     }
+    this.ensureBossCount(now)
     this.meleeEnemies = []
     this.bombs = []
+    this.lastArenaEventTime = now
     this.runGameLoop()
   }
 
@@ -543,10 +568,17 @@ export class DemoClient {
     this.gamePickups = createDemoPickups()
     this.hazards = createDemoHazards()
     this.projectiles = []
-    this.boss = this.createBoss()
+    const now = Date.now()
+    this.boss = this.createBoss(0, now)
+    this.extraBosses = []
+    this.extraBossFireTimes.clear()
+    this.ensureBossCount(now)
     this.meleeEnemies = []
     this.bombs = []
-    this.lastBossFireTime = Date.now()
+    this.lastBossFireTime = now
+    this.lastArenaEventTime = now
+    this.arenaEvent = null
+    this.bonusPickupCounter = 0
     this.runGameLoop()
   }
 
@@ -576,6 +608,8 @@ export class DemoClient {
         burnUntil: 0,
         lastBurnTick: 0,
         burnOwnerId: null,
+        magnetUntil: 0,
+        scoreMultiplierUntil: 0,
         lastHazardHitTime: 0,
         lastStormHitTime: 0,
         respawnInvulnerableUntil: Date.now() + RESPAWN_INVULNERABILITY,
@@ -602,10 +636,13 @@ export class DemoClient {
       const storm = this.getStormState(now)
 
       this.updateHazards()
+      this.ensureBossCount(now)
       this.updateBoss(now)
+      this.updateExtraBosses(now)
       this.updateMeleeEnemies(now, elapsed)
       this.updateProjectiles(now)
       this.updateBombs(now)
+      this.updateArenaEvent(now, elapsed)
        
       // Process player movement
       this.room.players.forEach((player, index) => {
@@ -705,6 +742,24 @@ export class DemoClient {
             }
           }
 
+          this.extraBosses = this.extraBosses.filter((boss) => {
+            const distToBoss = Math.hypot(boss.x - state.x, boss.y - state.y)
+            if (distToBoss >= SHOCKWAVE_RADIUS + BOSS_RADIUS) return true
+
+            boss.health = Math.max(0, boss.health - this.scaleDamage(SHOCKWAVE_DAMAGE, now))
+            this.addScore(state, 75, now)
+            const angle = Math.atan2(boss.y - state.y, boss.x - state.x)
+            boss.vx += Math.cos(angle) * 4
+            boss.vy += Math.sin(angle) * 4
+
+            if (boss.health <= 0) {
+              this.addScore(state, BOSS_KILL_REWARD, now)
+              this.extraBossFireTimes.delete(boss.id)
+            }
+
+            return boss.health > 0
+          })
+
           this.meleeEnemies = this.meleeEnemies.filter((enemy) => {
             const distToEnemy = Math.hypot(enemy.x - state.x, enemy.y - state.y)
             if (distToEnemy >= SHOCKWAVE_RADIUS + enemy.radius) return true
@@ -763,6 +818,8 @@ export class DemoClient {
           })
         }
         
+        this.applyMagnetPull(state, now)
+
         // Check pickup collisions
         this.gamePickups.forEach(pickup => {
           if (pickup.collected) return
@@ -773,7 +830,7 @@ export class DemoClient {
           if (dist < PLAYER_RADIUS + 20) {
             pickup.collected = true
             pickup.respawnAt = now + getPickupRespawnDelay(pickup.type)
-            const points = this.getPickupPoints(pickup.type, now)
+            const points = this.getPickupPoints(pickup.type, now, state)
             state.score += points
             this.applyPickupEffect(pickup.type, player.id, state, now)
 
@@ -789,6 +846,9 @@ export class DemoClient {
       })
       
       // Handle pickup respawning (outside of player loop)
+      this.gamePickups = this.gamePickups.filter((pickup) =>
+        !pickup.id.startsWith("bonus-") || !pickup.collected || (pickup.respawnAt ?? 0) > now
+      )
       this.gamePickups.forEach(pickup => {
         if (pickup.collected && pickup.respawnAt && now >= pickup.respawnAt) {
           pickup.collected = false
@@ -816,6 +876,12 @@ export class DemoClient {
             dashCooldown: Math.max(0, DASH_COOLDOWN - (now - state.lastDashTime)),
             abilityCooldown: Math.max(0, ABILITY_COOLDOWN - (now - state.lastAbilityTime)),
             isInvulnerable: state.isDashing || now < state.respawnInvulnerableUntil || now < state.shieldUntil,
+            boostUntil: state.boostUntil,
+            shieldUntil: state.shieldUntil,
+            freezeUntil: state.freezeUntil,
+            burnUntil: state.burnUntil,
+            magnetUntil: state.magnetUntil,
+            scoreMultiplierUntil: state.scoreMultiplierUntil,
             isRespawning: state.respawnAt !== null,
             respawnAt: state.respawnAt ?? undefined,
             lastDashTime: state.lastDashTime,
@@ -826,9 +892,11 @@ export class DemoClient {
         hazards: this.hazards.map(hazard => ({ ...hazard })),
         projectiles: this.projectiles.map(projectile => ({ ...projectile })),
         boss: this.boss ? { ...this.boss } : null,
+        bosses: this.getAllBosses().map(boss => ({ ...boss })),
         meleeEnemies: this.meleeEnemies.map(enemy => ({ ...enemy })),
         bombs: this.bombs.map(bomb => ({ ...bomb })),
         storm,
+        arenaEvent: this.arenaEvent ? { ...this.arenaEvent } : null,
         timeRemaining,
         matchState: "playing",
       }
@@ -928,24 +996,273 @@ export class DemoClient {
   private addScore(state: DemoPlayerState | undefined, base: number, now: number): number {
     if (!state) return 0
 
-    const points = this.scaleReward(base, now)
+    const points = Math.round(this.scaleReward(base, now) * this.getScoreMultiplier(state, now))
     state.score += points
     return points
   }
 
-  private createBoss(): BossState {
-    const maxHealth = 320 + this.room.players.length * 35
-    return {
-      id: "boss",
-      nickname: "Arena Warden",
-      x: ARENA_WIDTH / 2,
-      y: ARENA_HEIGHT / 2,
+  private getScoreMultiplier(state: DemoPlayerState, now: number): number {
+    return now < state.scoreMultiplierUntil ? SCORE_MULTIPLIER : 1
+  }
+
+  private createBoss(index = 0, now = Date.now()): BossState {
+    const maxHealth = 250 + this.room.players.length * 24 + index * 28
+    const angle = -Math.PI / 2 + index * Math.PI
+    const spawnRadius = index === 0 ? 0 : 210
+    const id = index === 0 ? "boss" : `boss-${index + 1}`
+    const boss = {
+      id,
+      nickname: index === 0 ? "Arena Warden" : `Arena Warden ${index + 1}`,
+      x: clamp(ARENA_WIDTH / 2 + Math.cos(angle) * spawnRadius, BOSS_RADIUS, ARENA_WIDTH - BOSS_RADIUS),
+      y: clamp(ARENA_HEIGHT / 2 + Math.sin(angle) * spawnRadius, BOSS_RADIUS, ARENA_HEIGHT - BOSS_RADIUS),
       vx: 0,
       vy: 0,
       health: maxHealth,
       maxHealth,
       targetPlayerId: null,
       fireCooldown: BOSS_FIRE_INTERVAL,
+    }
+
+    if (index > 0) {
+      this.extraBossFireTimes.set(id, now + index * 420)
+    }
+
+    return boss
+  }
+
+  private getAllBosses(): BossState[] {
+    return [...(this.boss ? [this.boss] : []), ...this.extraBosses]
+  }
+
+  private getDesiredBossCount(now: number): number {
+    const progress = this.getRoundProgress(now)
+    let count = MIN_BOSS_COUNT
+
+    if (this.room.settings.matchDuration >= 240 && progress > 0.45) {
+      count += 1
+    }
+    if ((this.room.settings.matchDuration >= 300 || this.room.players.length >= 5) && progress > 0.72) {
+      count += 1
+    }
+
+    return clamp(count, MIN_BOSS_COUNT, MAX_BOSS_COUNT)
+  }
+
+  private ensureBossCount(now: number): void {
+    if (!this.boss) {
+      this.boss = this.createBoss(0, now)
+      this.lastBossFireTime = now + 600
+    }
+
+    const desiredCount = this.getDesiredBossCount(now)
+    while (this.getAllBosses().length < desiredCount) {
+      const index = this.getAllBosses().length
+      this.extraBosses.push(this.createBoss(index, now))
+    }
+  }
+
+  private updateExtraBosses(now: number): void {
+    const livingPlayers = this.getLivingPlayerEntries()
+    this.extraBosses = this.extraBosses.filter((boss, index) => {
+      if (boss.health <= 0) {
+        this.extraBossFireTimes.delete(boss.id)
+        return false
+      }
+
+      this.updateBossUnit(boss, index + 1, now, livingPlayers)
+      return true
+    })
+  }
+
+  private updateBossUnit(
+    boss: BossState,
+    index: number,
+    now: number,
+    livingPlayers: Array<{ player: Player; state: DemoPlayerState }>
+  ): void {
+    if (livingPlayers.length === 0) {
+      boss.vx *= 0.9
+      boss.vy *= 0.9
+      boss.x = clamp(boss.x + boss.vx, BOSS_RADIUS, ARENA_WIDTH - BOSS_RADIUS)
+      boss.y = clamp(boss.y + boss.vy, BOSS_RADIUS, ARENA_HEIGHT - BOSS_RADIUS)
+      return
+    }
+
+    let target = livingPlayers[0]
+    let targetDistance = Number.POSITIVE_INFINITY
+    livingPlayers.forEach((entry) => {
+      const dist = Math.hypot(entry.state.x - boss.x, entry.state.y - boss.y)
+      if (dist < targetDistance) {
+        target = entry
+        targetDistance = dist
+      }
+    })
+
+    boss.targetPlayerId = target.player.id
+    const progress = this.getRoundProgress(now)
+    const bossAcceleration = this.scaleSpeed(BOSS_SPEED * 0.86, now)
+    const bossMaxSpeed = this.scaleSpeed(BOSS_MAX_SPEED * 0.92, now)
+    const fireInterval = BOSS_FIRE_INTERVAL * (1.18 - progress * 0.22 + index * 0.08)
+    const projectileSpeed = this.scaleSpeed(BOSS_PROJECTILE_SPEED * 0.95, now)
+    const angle = Math.atan2(target.state.y - boss.y, target.state.x - boss.x)
+    const flankAngle = angle + (index % 2 === 0 ? -Math.PI / 2 : Math.PI / 2)
+    const movementAngle =
+      targetDistance < BOSS_MIN_RANGE
+        ? angle + Math.PI
+        : targetDistance > BOSS_PREFERRED_RANGE + 140
+          ? angle
+          : flankAngle
+    const acceleration =
+      targetDistance < BOSS_MIN_RANGE
+        ? bossAcceleration
+        : targetDistance > BOSS_PREFERRED_RANGE + 140
+          ? bossAcceleration * 0.68
+          : bossAcceleration * 0.42
+
+    let separationX = 0
+    let separationY = 0
+    this.getAllBosses().forEach((otherBoss) => {
+      if (otherBoss.id === boss.id) return
+      const dx = boss.x - otherBoss.x
+      const dy = boss.y - otherBoss.y
+      const distance = Math.max(1, Math.hypot(dx, dy))
+      if (distance > BOSS_RADIUS * 4) return
+      const push = (1 - distance / (BOSS_RADIUS * 4)) * 0.65
+      separationX += (dx / distance) * push
+      separationY += (dy / distance) * push
+    })
+
+    boss.vx = boss.vx * 0.9 + Math.cos(movementAngle) * acceleration + separationX
+    boss.vy = boss.vy * 0.9 + Math.sin(movementAngle) * acceleration + separationY
+    const bossSpeed = Math.hypot(boss.vx, boss.vy)
+    if (bossSpeed > bossMaxSpeed) {
+      boss.vx = (boss.vx / bossSpeed) * bossMaxSpeed
+      boss.vy = (boss.vy / bossSpeed) * bossMaxSpeed
+    }
+    boss.x = clamp(boss.x + boss.vx, BOSS_RADIUS, ARENA_WIDTH - BOSS_RADIUS)
+    boss.y = clamp(boss.y + boss.vy, BOSS_RADIUS, ARENA_HEIGHT - BOSS_RADIUS)
+
+    const lastFireTime = this.extraBossFireTimes.get(boss.id) ?? now
+    boss.fireCooldown = Math.max(0, fireInterval - (now - lastFireTime))
+
+    livingPlayers.forEach(({ player, state }) => {
+      const dist = Math.hypot(state.x - boss.x, state.y - boss.y)
+      if (dist < BOSS_RADIUS + PLAYER_RADIUS && now - state.lastHazardHitTime > HAZARD_HIT_COOLDOWN) {
+        state.lastHazardHitTime = now
+        const knockbackAngle = Math.atan2(state.y - boss.y, state.x - boss.x)
+        state.vx = Math.cos(knockbackAngle) * 9
+        state.vy = Math.sin(knockbackAngle) * 9
+        state.x = clamp(state.x + Math.cos(knockbackAngle) * 32, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
+        state.y = clamp(state.y + Math.sin(knockbackAngle) * 32, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
+        this.damagePlayer(player.id, state, BOSS_CONTACT_DAMAGE, now, boss.id)
+      }
+    })
+
+    if (now - lastFireTime >= fireInterval && targetDistance < 780) {
+      this.extraBossFireTimes.set(boss.id, now)
+      this.projectiles.push({
+        id: `${boss.id}-shot-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        x: boss.x,
+        y: boss.y,
+        vx: Math.cos(angle) * projectileSpeed,
+        vy: Math.sin(angle) * projectileSpeed,
+        radius: BOSS_PROJECTILE_RADIUS,
+        damage: Math.max(10, BOSS_PROJECTILE_DAMAGE - 2),
+        ownerId: boss.id,
+        type: "boss",
+        expiresAt: now + PROJECTILE_LIFETIME,
+      })
+    }
+  }
+
+  private fireBossVolley(now: number): void {
+    this.getAllBosses().forEach((boss, bossIndex) => {
+      const shots = 3
+      for (let index = 0; index < shots; index += 1) {
+        const angle = (Math.PI * 2 * index) / shots + bossIndex * 0.45
+        this.projectiles.push({
+          id: `${boss.id}-volley-${now}-${index}`,
+          x: boss.x,
+          y: boss.y,
+          vx: Math.cos(angle) * (BOSS_PROJECTILE_SPEED * 0.82),
+          vy: Math.sin(angle) * (BOSS_PROJECTILE_SPEED * 0.82),
+          radius: BOSS_PROJECTILE_RADIUS,
+          damage: Math.max(8, BOSS_PROJECTILE_DAMAGE - 4),
+          ownerId: boss.id,
+          type: "boss",
+          expiresAt: now + PROJECTILE_LIFETIME,
+        })
+      }
+    })
+  }
+
+  private triggerArenaEvent(now: number): void {
+    const roll = Math.random()
+    if (roll < 0.34) {
+      this.spawnBonusPickups(now)
+      this.arenaEvent = {
+        id: `event-${now}`,
+        name: "Supply Surge",
+        description: "Fresh powerups are scattering inside the arena.",
+        endsAt: now + ARENA_EVENT_DURATION,
+        tone: "supply",
+      }
+      return
+    }
+
+    if (roll < 0.67) {
+      const count = clamp(1 + Math.floor(this.room.players.length / 3), 2, 4)
+      for (let index = 0; index < count; index += 1) {
+        this.meleeEnemies.push(this.createMeleeEnemy(this.meleeEnemies.length, now))
+      }
+      this.arenaEvent = {
+        id: `event-${now}`,
+        name: "Hunter Rush",
+        description: "Extra hunters are cutting through the safe zone.",
+        endsAt: now + ARENA_EVENT_DURATION,
+        tone: "danger",
+      }
+      return
+    }
+
+    this.fireBossVolley(now)
+    this.arenaEvent = {
+      id: `event-${now}`,
+      name: "Warden Volley",
+      description: "Wardens are firing a cross-map spread.",
+      endsAt: now + ARENA_EVENT_DURATION,
+      tone: "warden",
+    }
+  }
+
+  private updateArenaEvent(now: number, elapsed: number): void {
+    if (this.arenaEvent && now >= this.arenaEvent.endsAt) {
+      this.arenaEvent = null
+    }
+
+    if (elapsed * 1000 < ARENA_EVENT_FIRST_DELAY || now - this.lastArenaEventTime < ARENA_EVENT_INTERVAL) {
+      return
+    }
+
+    this.lastArenaEventTime = now
+    this.triggerArenaEvent(now)
+  }
+
+  private spawnBonusPickups(now: number): void {
+    const activeBonusPickups = this.gamePickups.filter((pickup) => pickup.id.startsWith("bonus-") && !pickup.collected)
+    const count = Math.max(0, Math.min(4, MAX_BONUS_PICKUPS - activeBonusPickups.length))
+    const types: Pickup["type"][] = ["energy", "boost", "shield", "heal", "magnet", "multiplier", getRandomSpecialPickupType()]
+
+    for (let index = 0; index < count; index += 1) {
+      const position = this.getPickupSpawnPosition(now)
+      this.bonusPickupCounter += 1
+      this.gamePickups.push({
+        id: `bonus-${now}-${this.bonusPickupCounter}`,
+        type: types[Math.floor(Math.random() * types.length)],
+        x: position.x,
+        y: position.y,
+        collected: false,
+      })
     }
   }
 
@@ -1207,11 +1524,42 @@ export class DemoClient {
         }
       }
 
+      this.extraBosses = this.extraBosses.filter((boss) => {
+        const dist = Math.hypot(boss.x - bomb.x, boss.y - bomb.y)
+        if (dist >= bomb.radius + BOSS_RADIUS) return true
+
+        boss.health = Math.max(0, boss.health - this.scaleDamage(BOMB_DAMAGE, now))
+        this.addScore(ownerState, 75, now)
+        if (boss.health <= 0) {
+          this.addScore(ownerState, BOSS_KILL_REWARD, now)
+          this.extraBossFireTimes.delete(boss.id)
+        }
+
+        return boss.health > 0
+      })
+
       return false
     })
   }
 
-  private getPickupPoints(type: Pickup["type"], now: number): number {
+  private applyMagnetPull(state: DemoPlayerState, now: number): void {
+    if (now >= state.magnetUntil) return
+
+    this.gamePickups.forEach((pickup) => {
+      if (pickup.collected) return
+
+      const dx = state.x - pickup.x
+      const dy = state.y - pickup.y
+      const distance = Math.max(1, Math.hypot(dx, dy))
+      if (distance > MAGNET_RADIUS) return
+
+      const strength = MAGNET_PULL_SPEED * (1 - distance / MAGNET_RADIUS + 0.35)
+      pickup.x = clamp(pickup.x + (dx / distance) * strength, 60, ARENA_WIDTH - 60)
+      pickup.y = clamp(pickup.y + (dy / distance) * strength, 60, ARENA_HEIGHT - 60)
+    })
+  }
+
+  private getPickupPoints(type: Pickup["type"], now: number, state?: DemoPlayerState): number {
     const basePoints = (() => {
       switch (type) {
         case "boost":
@@ -1225,12 +1573,17 @@ export class DemoClient {
           return 35
         case "maxHealth":
           return 45
+        case "magnet":
+          return 35
+        case "multiplier":
+          return 40
         default:
           return 25
       }
     })()
 
-    return this.scaleReward(basePoints, now)
+    const points = this.scaleReward(basePoints, now)
+    return state ? Math.round(points * this.getScoreMultiplier(state, now)) : points
   }
 
   private applyPickupEffect(type: Pickup["type"], playerId: string, state: DemoPlayerState, now: number): void {
@@ -1268,6 +1621,11 @@ export class DemoClient {
           this.boss.vx *= 0.25
           this.boss.vy *= 0.25
         }
+        this.extraBosses.forEach((boss) => {
+          boss.vx *= 0.25
+          boss.vy *= 0.25
+          this.extraBossFireTimes.set(boss.id, (this.extraBossFireTimes.get(boss.id) ?? now) + FREEZE_DURATION)
+        })
         break
       case "burn":
         this.room.players.forEach((player) => {
@@ -1286,6 +1644,13 @@ export class DemoClient {
         if (this.boss) {
           this.boss.health = Math.max(0, this.boss.health - this.scaleDamage(45, now))
         }
+        this.extraBosses = this.extraBosses.filter((boss) => {
+          boss.health = Math.max(0, boss.health - this.scaleDamage(45, now))
+          if (boss.health <= 0) {
+            this.extraBossFireTimes.delete(boss.id)
+          }
+          return boss.health > 0
+        })
         break
       case "bomb":
         this.bombs.push({
@@ -1296,6 +1661,12 @@ export class DemoClient {
           explodeAt: now + BOMB_FUSE,
           ownerId: playerId,
         })
+        break
+      case "magnet":
+        state.magnetUntil = now + MAGNET_DURATION
+        break
+      case "multiplier":
+        state.scoreMultiplierUntil = now + SCORE_MULTIPLIER_DURATION
         break
     }
   }
@@ -1429,6 +1800,8 @@ export class DemoClient {
     state.freezeUntil = 0
     state.burnUntil = 0
     state.burnOwnerId = null
+    state.magnetUntil = 0
+    state.scoreMultiplierUntil = 0
     state.lastStormHitTime = 0
     state.respawnAt = now + RESPAWN_DELAY
     state.respawnInvulnerableUntil = 0
@@ -1448,6 +1821,8 @@ export class DemoClient {
     state.freezeUntil = 0
     state.burnUntil = 0
     state.burnOwnerId = null
+    state.magnetUntil = 0
+    state.scoreMultiplierUntil = 0
     state.lastStormHitTime = 0
     state.respawnAt = null
     state.respawnInvulnerableUntil = now + RESPAWN_INVULNERABILITY
@@ -1462,10 +1837,15 @@ export class DemoClient {
     this.hazards = []
     this.projectiles = []
     this.boss = null
+    this.extraBosses = []
     this.meleeEnemies = []
     this.bombs = []
     this.aiTargets.clear()
     this.lastBossFireTime = 0
+    this.extraBossFireTimes.clear()
+    this.lastArenaEventTime = 0
+    this.arenaEvent = null
+    this.bonusPickupCounter = 0
     this.currentInput = {
       up: false,
       down: false,
@@ -1526,9 +1906,9 @@ export class DemoClient {
       urgency = Math.max(urgency, threat)
     }
 
-    if (this.boss) {
-      addDanger(this.boss.x, this.boss.y, BOSS_RADIUS + 250, 1.1)
-    }
+    this.getAllBosses().forEach((boss) => {
+      addDanger(boss.x, boss.y, BOSS_RADIUS + 250, 1.1)
+    })
 
     this.meleeEnemies.forEach((enemy) => {
       addDanger(enemy.x, enemy.y, enemy.radius + 220, 1.4)
@@ -1610,6 +1990,12 @@ export class DemoClient {
         case "boost":
           value += personality === 1 ? 38 : 28
           break
+        case "magnet":
+          value += personality === 1 ? 42 : 30
+          break
+        case "multiplier":
+          value += personality === 2 ? 54 : 40
+          break
         default:
           value += 20
       }
@@ -1663,7 +2049,7 @@ export class DemoClient {
       return {
         x: pickup.x,
         y: pickup.y,
-        changeAt: now + 1800 + Math.random() * 1200,
+        changeAt: now + 2400 + Math.random() * 1600,
         mode,
         pickupId: pickup.id,
       }
@@ -1677,7 +2063,7 @@ export class DemoClient {
         return {
           x: clamp(target.state.x + Math.cos(offsetAngle) * offsetDistance, 70, ARENA_WIDTH - 70),
           y: clamp(target.state.y + Math.sin(offsetAngle) * offsetDistance, 70, ARENA_HEIGHT - 70),
-          changeAt: now + (mode === "ambush" ? 2300 : 1600) + Math.random() * 1300,
+          changeAt: now + (mode === "ambush" ? 3000 : 2300) + Math.random() * 1600,
           mode,
           targetId: target.player.id,
         }
@@ -1687,7 +2073,7 @@ export class DemoClient {
     return {
       x: Math.random() * (ARENA_WIDTH - 220) + 110,
       y: Math.random() * (ARENA_HEIGHT - 220) + 110,
-      changeAt: now + 2600 + Math.random() * 2600,
+      changeAt: now + 3400 + Math.random() * 2800,
       mode: "wander",
     }
   }
@@ -1703,10 +2089,10 @@ export class DemoClient {
     if (target.targetId) {
       const targetState = this.playerStates.get(target.targetId)
       if (targetState && !targetState.respawnAt) {
-        const orbitAngle = (index + 1) * 1.9 + now / 1200
-        const orbitDistance = target.mode === "ambush" ? 130 : 70
-        const leadX = targetState.x + targetState.vx * 12
-        const leadY = targetState.y + targetState.vy * 12
+        const orbitAngle = (index + 1) * 1.9 + now / 2200
+        const orbitDistance = target.mode === "ambush" ? 145 : 90
+        const leadX = targetState.x + targetState.vx * 8
+        const leadY = targetState.y + targetState.vy * 8
 
         return {
           x: clamp(leadX + Math.cos(orbitAngle) * orbitDistance, 70, ARENA_WIDTH - 70),
@@ -1722,8 +2108,8 @@ export class DemoClient {
     const closePlayer = this.getLivingPlayerEntries(playerId).some(({ state: otherState }) =>
       Math.hypot(otherState.x - state.x, otherState.y - state.y) < SHOCKWAVE_RADIUS * 0.9
     )
-    const closeBoss = Boolean(
-      this.boss && Math.hypot(this.boss.x - state.x, this.boss.y - state.y) < SHOCKWAVE_RADIUS + BOSS_RADIUS
+    const closeBoss = this.getAllBosses().some((boss) =>
+      Math.hypot(boss.x - state.x, boss.y - state.y) < SHOCKWAVE_RADIUS + BOSS_RADIUS
     )
     const closeHunter = this.meleeEnemies.some((enemy) =>
       Math.hypot(enemy.x - state.x, enemy.y - state.y) < SHOCKWAVE_RADIUS + enemy.radius
@@ -1739,7 +2125,7 @@ export class DemoClient {
 
     const dangerTarget = this.getAIDangerTarget(state, now)
     let aiTarget = this.aiTargets.get(playerId)
-    const targetReached = aiTarget ? Math.hypot(aiTarget.x - state.x, aiTarget.y - state.y) < 34 : false
+    const targetReached = aiTarget ? Math.hypot(aiTarget.x - state.x, aiTarget.y - state.y) < 46 : false
     const pickupUnavailable = Boolean(
       aiTarget?.pickupId && !this.gamePickups.some((pickup) => pickup.id === aiTarget?.pickupId && !pickup.collected)
     )
@@ -1786,7 +2172,7 @@ export class DemoClient {
 
     const dx = targetX - state.x
     const dy = targetY - state.y
-    const deadzone = 20
+    const deadzone = aiTarget.mode === "collect" ? 24 : 34
     
     return {
       up: dy < -deadzone,

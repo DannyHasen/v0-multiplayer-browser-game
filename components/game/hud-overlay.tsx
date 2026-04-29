@@ -1,7 +1,7 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Timer, Zap, Radio, Copy, Check, Skull, AlertTriangle } from "lucide-react"
+import { Timer, Zap, Radio, Copy, Check, Skull, AlertTriangle, Gauge, Shield, Snowflake, Flame, Magnet, Percent } from "lucide-react"
 import { useState } from "react"
 import { Progress } from "@/components/ui/progress"
 import { formatTime, PLAYER } from "@/lib/game/constants"
@@ -31,10 +31,24 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
 
   // Sort players by score for leaderboard
   const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score)
+  const now = Date.now()
+  const wardens = gameState.bosses ?? (gameState.boss ? [gameState.boss] : [])
+  const wardenHealth = wardens.reduce((total, boss) => total + Math.max(0, boss.health), 0)
+  const wardenMaxHealth = wardens.reduce((total, boss) => total + boss.maxHealth, 0)
   const respawnSeconds = currentPlayer?.respawnAt
-    ? Math.max(0, Math.ceil((currentPlayer.respawnAt - Date.now()) / 1000))
+    ? Math.max(0, Math.ceil((currentPlayer.respawnAt - now) / 1000))
     : 0
   const currentMaxHealth = currentPlayer?.maxHealth ?? PLAYER.MAX_HEALTH
+  const activeEffects = currentPlayer
+    ? [
+        { label: "Boost", until: currentPlayer.boostUntil, color: "#ffff00", Icon: Gauge },
+        { label: "Shield", until: currentPlayer.shieldUntil, color: "#00ff88", Icon: Shield },
+        { label: "Freeze", until: currentPlayer.freezeUntil, color: "#7dd3ff", Icon: Snowflake },
+        { label: "Burn", until: currentPlayer.burnUntil, color: "#ff5a2f", Icon: Flame },
+        { label: "Magnet", until: currentPlayer.magnetUntil, color: "#b56cff", Icon: Magnet },
+        { label: "Overdrive", until: currentPlayer.scoreMultiplierUntil, color: "#ffd166", Icon: Percent },
+      ].filter((effect) => (effect.until ?? 0) > now)
+    : []
 
   return (
     <div className="absolute inset-0 pointer-events-none">
@@ -77,6 +91,22 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
                   className="h-2"
                 />
               </div>
+
+              {activeEffects.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {activeEffects.map((effect) => (
+                    <div
+                      key={effect.label}
+                      className="flex items-center gap-1 rounded-md border bg-secondary/45 px-2 py-1 text-[10px] font-medium"
+                      style={{ borderColor: `${effect.color}55`, color: effect.color }}
+                    >
+                      <effect.Icon className="h-3 w-3" />
+                      <span>{effect.label}</span>
+                      <span className="font-mono">{Math.ceil(((effect.until ?? now) - now) / 1000)}s</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -112,21 +142,34 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
               {formatTime(gameState.timeRemaining)}
             </span>
           </div>
-          {gameState.boss && (
+          {wardens.length > 0 && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
-                <span>{gameState.boss.nickname}</span>
-                <span>{Math.ceil(gameState.boss.health)}</span>
+                <span>Wardens x{wardens.length}</span>
+                <span>{Math.ceil(wardenHealth)}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-destructive"
-                  style={{ width: `${Math.max(0, (gameState.boss.health / gameState.boss.maxHealth) * 100)}%` }}
+                  style={{ width: `${wardenMaxHealth > 0 ? Math.max(0, (wardenHealth / wardenMaxHealth) * 100) : 0}%` }}
                 />
               </div>
               {(gameState.meleeEnemies?.length ?? 0) > 0 && (
                 <div className="mt-1 text-[10px] uppercase tracking-wider text-orange-400">
                   Hunters: {gameState.meleeEnemies?.length}
+                </div>
+              )}
+              {gameState.arenaEvent && (
+                <div
+                  className={`mt-2 rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider ${
+                    gameState.arenaEvent.tone === "supply"
+                      ? "border-primary/40 text-primary"
+                      : gameState.arenaEvent.tone === "warden"
+                        ? "border-destructive/50 text-destructive-foreground"
+                        : "border-orange-400/50 text-orange-300"
+                  }`}
+                >
+                  {gameState.arenaEvent.name}
                 </div>
               )}
             </div>

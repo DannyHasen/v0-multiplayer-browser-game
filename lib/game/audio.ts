@@ -8,6 +8,8 @@ export type GameSound =
   | "bomb"
   | "heal"
   | "maxHealth"
+  | "magnet"
+  | "multiplier"
   | "hit"
   | "kill"
   | "death"
@@ -182,6 +184,18 @@ export function playGameSound(sound: GameSound): void {
       scheduleTone(392, 110, 0, "triangle", 0.026)
       scheduleTone(587, 120, 100, "triangle", 0.028)
       scheduleTone(784, 170, 220, "triangle", 0.026)
+      break
+    case "magnet":
+      scheduleTone(196, 130, 0, "sine", 0.026)
+      scheduleTone(293.66, 150, 70, "triangle", 0.024)
+      scheduleTone(392, 190, 155, "sine", 0.022)
+      scheduleNoise(80, 45, 0.014, 1200)
+      break
+    case "multiplier":
+      scheduleTone(659.25, 70, 0, "triangle", 0.026)
+      scheduleTone(880, 85, 65, "triangle", 0.028)
+      scheduleTone(1318.51, 120, 145, "sine", 0.028)
+      scheduleTone(1760, 150, 265, "sine", 0.022)
       break
     case "hit":
       scheduleNoise(90, 0, 0.04, 650)

@@ -67,13 +67,13 @@ export function Hero() {
               Play Now
             </Button>
           </Link>
-          <Link href="#how-to-play">
+          <Link href="#powerups">
             <Button 
               size="lg" 
               variant="outline"
               className="h-14 px-8 text-lg font-semibold border-border hover:bg-secondary/50 transition-all duration-300"
             >
-              How to Play
+              View Powerups
             </Button>
           </Link>
         </motion.div>

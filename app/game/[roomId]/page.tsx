@@ -45,6 +45,10 @@ function getPickupSound(type: PickupType | undefined): GameSound {
       return "heal"
     case "maxHealth":
       return "maxHealth"
+    case "magnet":
+      return "magnet"
+    case "multiplier":
+      return "multiplier"
     default:
       return "powerup"
   }
@@ -87,8 +91,10 @@ export default function GamePage({ params }: { params: Promise<{ roomId: string 
 
   const getAttackerName = useCallback((attackerId: string) => {
     const latestState = useGameStore.getState().gameState
-    if (attackerId === "boss") {
-      return latestState?.boss?.nickname ?? "Arena Warden"
+    if (attackerId === "boss" || attackerId.startsWith("boss-")) {
+      return latestState?.bosses?.find((boss) => boss.id === attackerId)?.nickname ??
+        latestState?.boss?.nickname ??
+        "Arena Warden"
     }
     if (attackerId === "hazard") {
       return "Arena hazard"
