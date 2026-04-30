@@ -1,4 +1,4 @@
-import type { Player, Pickup, Hazard, Projectile, BossState, MeleeEnemy, BombState, StormState, GameState, MapTheme } from "@/types/game"
+import type { Player, Pickup, Hazard, Projectile, BossState, MeleeEnemy, BombState, StormState, GameState, MapTheme, ControlZoneState } from "@/types/game"
 import { PLAYER_COLORS } from "@/types/game"
 import { ARENA, PLAYER, PICKUP, MAP_THEMES, VISUAL } from "./constants"
 
@@ -78,6 +78,7 @@ export function render(
   drawBackground(renderCtx)
   drawGrid(renderCtx)
   drawStorm(renderCtx, gameState.storm ?? null)
+  drawControlZone(renderCtx, gameState.controlZone ?? null)
   drawHazards(renderCtx, gameState.hazards)
   drawBombs(renderCtx, gameState.bombs ?? [])
   drawPickups(renderCtx, gameState.pickups)
@@ -183,6 +184,43 @@ function drawStorm(ctx: RenderContext, storm: StormState | null) {
   ctx.ctx.lineWidth = 1
   ctx.ctx.stroke()
   ctx.ctx.restore()
+  ctx.ctx.shadowBlur = 0
+}
+
+function drawControlZone(ctx: RenderContext, controlZone: ControlZoneState | null) {
+  if (!controlZone?.active) return
+
+  const themeConfig = MAP_THEMES[ctx.theme]
+  const x = ctx.offsetX + controlZone.x * ctx.scale
+  const y = ctx.offsetY + controlZone.y * ctx.scale
+  const radius = controlZone.radius * ctx.scale
+  const pulse = Math.sin(ctx.time * 0.005) * 0.18 + 0.82
+  const holderAlpha = controlZone.holders.length > 0 ? 0.2 : 0.09
+
+  ctx.ctx.save()
+  ctx.ctx.beginPath()
+  ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.ctx.fillStyle = controlZone.contested
+    ? `rgba(255, 122, 47, ${holderAlpha * pulse})`
+    : `${themeConfig.gridGlow}${controlZone.holders.length > 0 ? "33" : "18"}`
+  ctx.ctx.fill()
+
+  ctx.ctx.beginPath()
+  ctx.ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.ctx.strokeStyle = controlZone.contested ? "rgba(255, 122, 47, 0.9)" : themeConfig.gridGlow
+  ctx.ctx.lineWidth = 3
+  ctx.ctx.shadowColor = controlZone.contested ? "#ff7a2f" : themeConfig.gridGlow
+  ctx.ctx.shadowBlur = 22
+  ctx.ctx.stroke()
+
+  ctx.ctx.beginPath()
+  ctx.ctx.arc(x, y, radius * 0.68, 0, Math.PI * 2)
+  ctx.ctx.strokeStyle = "rgba(255, 255, 255, 0.24)"
+  ctx.ctx.lineWidth = 1
+  ctx.ctx.setLineDash([8 * ctx.scale, 8 * ctx.scale])
+  ctx.ctx.stroke()
+  ctx.ctx.restore()
+  ctx.ctx.setLineDash([])
   ctx.ctx.shadowBlur = 0
 }
 

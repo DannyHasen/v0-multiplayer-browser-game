@@ -167,6 +167,8 @@ export class PartyClient {
         maxPlayers: 8,
         matchDuration: 180,
         mapTheme: "cyber",
+        difficulty: "standard",
+        gameMode: "score",
       },
       hostId: "",
     }

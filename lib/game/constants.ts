@@ -57,6 +57,40 @@ export const MATCH = {
   HIT_POINTS: 25,
 } as const
 
+export const DIFFICULTY_LEVELS = {
+  casual: {
+    name: "Casual",
+    description: "More room to recover, softer hazards, and slower pressure.",
+  },
+  standard: {
+    name: "Standard",
+    description: "The intended mix of scoring, danger, and warden pressure.",
+  },
+  hardcore: {
+    name: "Hardcore",
+    description: "Faster scaling, heavier hits, and more frequent arena events.",
+  },
+} as const
+
+export const GAME_MODES = {
+  score: {
+    name: "Score Rush",
+    description: "Classic free-for-all. Collect, fight, survive, and finish with the highest score.",
+  },
+  warden: {
+    name: "Warden Hunt",
+    description: "Wardens are worth more, pickups are worth less, and boss damage becomes the main path to winning.",
+  },
+  survival: {
+    name: "Survival",
+    description: "Stay alive for passive points. Deaths hurt more, but clean rotations pay off.",
+  },
+  control: {
+    name: "Rift Control",
+    description: "Hold the glowing control zone for steady points while the arena tries to push you out.",
+  },
+} as const
+
 // Room settings
 export const ROOM = {
   CODE_LENGTH: 6,
@@ -100,6 +134,7 @@ export const RENDER_LAYERS = {
 export const MAP_THEMES = {
   cyber: {
     name: "Cyber Grid",
+    description: "Balanced corners, clean center fights, and predictable patrol lanes.",
     background: "#0a0a1a",
     gridColor: "#1a1a3a",
     gridGlow: "#00ffff",
@@ -107,6 +142,7 @@ export const MAP_THEMES = {
   },
   neon: {
     name: "Neon Pulse",
+    description: "Fast horizontal and vertical lanes that reward sharp rotations.",
     background: "#0d0015",
     gridColor: "#1a0a2a",
     gridGlow: "#ff00ff",
@@ -114,10 +150,35 @@ export const MAP_THEMES = {
   },
   void: {
     name: "Void Rift",
+    description: "Diagonal pressure and awkward angles make escapes less obvious.",
     background: "#050510",
     gridColor: "#101020",
     gridGlow: "#8800ff",
     accentColor: "#00ff88",
+  },
+  frost: {
+    name: "Cryo Lab",
+    description: "Tight mid-map crossings with more defensive pickups and freeze routes.",
+    background: "#06131a",
+    gridColor: "#123044",
+    gridGlow: "#7dd3ff",
+    accentColor: "#d8fbff",
+  },
+  foundry: {
+    name: "Solar Foundry",
+    description: "Dangerous lanes, stronger combat pickups, and less forgiveness near the edges.",
+    background: "#170b08",
+    gridColor: "#2a1710",
+    gridGlow: "#ff7a2f",
+    accentColor: "#ffd166",
+  },
+  garden: {
+    name: "Overgrowth",
+    description: "A maze-like arena with side pockets, safer healing routes, and ambush corners.",
+    background: "#07140e",
+    gridColor: "#123326",
+    gridGlow: "#32e875",
+    accentColor: "#ffcf5a",
   },
 } as const
 

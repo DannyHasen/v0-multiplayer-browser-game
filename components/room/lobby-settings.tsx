@@ -4,9 +4,10 @@ import { useCallback, useMemo, memo } from "react"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Settings } from "lucide-react"
-import type { RoomSettings, MapTheme } from "@/types/game"
-import { MAP_THEMES, MATCH } from "@/lib/game/constants"
+import type { LucideIcon } from "lucide-react"
+import { Activity, Crosshair, Flame, Gauge, Leaf, Map as MapIcon, Settings, Shield, Skull, Snowflake, Target, Trophy } from "lucide-react"
+import type { DifficultyLevel, GameMode, MapTheme, RoomSettings } from "@/types/game"
+import { DIFFICULTY_LEVELS, GAME_MODES, MAP_THEMES, MATCH } from "@/lib/game/constants"
 
 interface LobbySettingsProps {
   settings: RoomSettings
@@ -26,6 +27,14 @@ export const LobbySettings = memo(function LobbySettings({ settings, onSettingsC
   const handleThemeChange = useCallback((value: MapTheme) => {
     onSettingsChange({ mapTheme: value })
   }, [onSettingsChange])
+
+  const handleDifficultyChange = useCallback((value: DifficultyLevel) => {
+    onSettingsChange({ difficulty: value })
+  }, [onSettingsChange])
+
+  const handleGameModeChange = useCallback((value: GameMode) => {
+    onSettingsChange({ gameMode: value })
+  }, [onSettingsChange])
   
   // Memoize the slider value to prevent re-renders
   const sliderValue = useMemo(() => [settings.matchDuration], [settings.matchDuration])
@@ -33,6 +42,28 @@ export const LobbySettings = memo(function LobbySettings({ settings, onSettingsC
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     return `${mins} min`
+  }
+
+  const gameModeIcons: Record<GameMode, LucideIcon> = {
+    score: Trophy,
+    warden: Crosshair,
+    survival: Shield,
+    control: Activity,
+  }
+
+  const difficultyIcons: Record<DifficultyLevel, LucideIcon> = {
+    casual: Shield,
+    standard: Gauge,
+    hardcore: Skull,
+  }
+
+  const mapIcons: Record<MapTheme, LucideIcon> = {
+    cyber: MapIcon,
+    neon: Activity,
+    void: Target,
+    frost: Snowflake,
+    foundry: Flame,
+    garden: Leaf,
   }
 
   return (
@@ -68,6 +99,72 @@ export const LobbySettings = memo(function LobbySettings({ settings, onSettingsC
         </div>
       </div>
 
+      {/* Game Mode */}
+      <div className="space-y-3">
+        <Label>Game Mode</Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {(Object.keys(GAME_MODES) as GameMode[]).map((mode) => {
+            const Icon = gameModeIcons[mode]
+            return (
+              <button
+                key={mode}
+                onClick={() => isHost && handleGameModeChange(mode)}
+                disabled={!isHost}
+                className={`
+                  min-h-[92px] rounded-lg border p-3 text-left transition-all
+                  ${settings.gameMode === mode
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-card/50 hover:border-primary/50"
+                  }
+                  ${!isHost && "opacity-50 cursor-not-allowed"}
+                `}
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <Icon className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-semibold">{GAME_MODES[mode].name}</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {GAME_MODES[mode].description}
+                </p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Difficulty */}
+      <div className="space-y-3">
+        <Label>Difficulty</Label>
+        <div className="grid grid-cols-3 gap-2">
+          {(Object.keys(DIFFICULTY_LEVELS) as DifficultyLevel[]).map((difficulty) => {
+            const Icon = difficultyIcons[difficulty]
+            return (
+              <button
+                key={difficulty}
+                onClick={() => isHost && handleDifficultyChange(difficulty)}
+                disabled={!isHost}
+                className={`
+                  rounded-lg border p-3 text-left transition-all
+                  ${settings.difficulty === difficulty
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-card/50 hover:border-primary/50"
+                  }
+                  ${!isHost && "opacity-50 cursor-not-allowed"}
+                `}
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <Icon className="h-4 w-4 text-primary" />
+                  <span className="text-xs font-semibold">{DIFFICULTY_LEVELS[difficulty].name}</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {DIFFICULTY_LEVELS[difficulty].description}
+                </p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* Max Players */}
       <div className="space-y-3">
         <Label>Max Players</Label>
@@ -91,36 +188,45 @@ export const LobbySettings = memo(function LobbySettings({ settings, onSettingsC
 
       {/* Map Theme */}
       <div className="space-y-3">
-        <Label>Arena Theme</Label>
-        <div className="grid grid-cols-3 gap-2">
-          {(Object.keys(MAP_THEMES) as MapTheme[]).map((theme) => (
-            <button
-              key={theme}
-              onClick={() => isHost && handleThemeChange(theme)}
-              disabled={!isHost}
-              className={`
-                p-3 rounded-lg border text-center transition-all
-                ${settings.mapTheme === theme
-                  ? "border-primary bg-primary/10"
-                  : "border-border bg-card/50 hover:border-primary/50"
-                }
-                ${!isHost && "opacity-50 cursor-not-allowed"}
-              `}
-              style={{
-                boxShadow: settings.mapTheme === theme
-                  ? `0 0 15px ${MAP_THEMES[theme].gridGlow}40`
-                  : undefined,
-              }}
-            >
-              <div
-                className="w-full h-8 rounded mb-2"
+        <Label>Arena Map</Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {(Object.keys(MAP_THEMES) as MapTheme[]).map((theme) => {
+            const Icon = mapIcons[theme]
+            return (
+              <button
+                key={theme}
+                onClick={() => isHost && handleThemeChange(theme)}
+                disabled={!isHost}
+                className={`
+                  rounded-lg border p-3 text-left transition-all
+                  ${settings.mapTheme === theme
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-card/50 hover:border-primary/50"
+                  }
+                  ${!isHost && "opacity-50 cursor-not-allowed"}
+                `}
                 style={{
-                  background: `linear-gradient(135deg, ${MAP_THEMES[theme].background}, ${MAP_THEMES[theme].gridGlow}40)`,
+                  boxShadow: settings.mapTheme === theme
+                    ? `0 0 15px ${MAP_THEMES[theme].gridGlow}40`
+                    : undefined,
                 }}
-              />
-              <span className="text-xs font-medium">{MAP_THEMES[theme].name}</span>
-            </button>
-          ))}
+              >
+                <div
+                  className="mb-3 h-8 w-full rounded"
+                  style={{
+                    background: `linear-gradient(135deg, ${MAP_THEMES[theme].background}, ${MAP_THEMES[theme].gridGlow}40)`,
+                  }}
+                />
+                <div className="mb-1 flex items-center gap-2">
+                  <Icon className="h-4 w-4" style={{ color: MAP_THEMES[theme].gridGlow }} />
+                  <span className="text-sm font-semibold">{MAP_THEMES[theme].name}</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {MAP_THEMES[theme].description}
+                </p>
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>

@@ -39,6 +39,15 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
     ? Math.max(0, Math.ceil((currentPlayer.respawnAt - now) / 1000))
     : 0
   const currentMaxHealth = currentPlayer?.maxHealth ?? PLAYER.MAX_HEALTH
+  const controlZone = gameState.controlZone
+  const isHoldingControl = Boolean(currentPlayer && controlZone?.holders.includes(currentPlayer.id))
+  const controlLabel = controlZone?.contested
+    ? "Contested"
+    : isHoldingControl
+      ? "Holding"
+      : (controlZone?.holders.length ?? 0) > 0
+        ? "Occupied"
+        : "Open"
   const activeEffects = currentPlayer
     ? [
         { label: "Boost", until: currentPlayer.boostUntil, color: "#ffff00", Icon: Gauge },
@@ -170,6 +179,14 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
                   }`}
                 >
                   {gameState.arenaEvent.name}
+                </div>
+              )}
+              {controlZone?.active && (
+                <div className="mt-2 rounded-md border border-primary/40 px-2 py-1 text-[10px] uppercase tracking-wider text-primary">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Rift {controlLabel}</span>
+                    <span className="font-mono">+{controlZone.pointsPerSecond}/s</span>
+                  </div>
                 </div>
               )}
             </div>

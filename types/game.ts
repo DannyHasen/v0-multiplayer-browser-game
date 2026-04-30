@@ -67,9 +67,13 @@ export interface RoomSettings {
   maxPlayers: number
   matchDuration: number // seconds
   mapTheme: MapTheme
+  difficulty: DifficultyLevel
+  gameMode: GameMode
 }
 
-export type MapTheme = "cyber" | "neon" | "void"
+export type MapTheme = "cyber" | "neon" | "void" | "frost" | "foundry" | "garden"
+export type DifficultyLevel = "casual" | "standard" | "hardcore"
+export type GameMode = "score" | "warden" | "survival" | "control"
 
 export interface GameState {
   players: Player[]
@@ -82,6 +86,7 @@ export interface GameState {
   bombs?: BombState[]
   storm?: StormState | null
   arenaEvent?: ArenaEventState | null
+  controlZone?: ControlZoneState | null
   timeRemaining: number
   matchState: RoomState
 }
@@ -189,6 +194,16 @@ export interface ArenaEventState {
   description: string
   endsAt: number
   tone: "supply" | "danger" | "warden"
+}
+
+export interface ControlZoneState {
+  x: number
+  y: number
+  radius: number
+  active: boolean
+  contested: boolean
+  holders: string[]
+  pointsPerSecond: number
 }
 
 export interface InputState {

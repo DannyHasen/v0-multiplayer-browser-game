@@ -191,6 +191,8 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
       maxPlayers: 8,
       matchDuration: MATCH.DEFAULT_DURATION,
       mapTheme: "cyber",
+      difficulty: "standard",
+      gameMode: "score",
     },
     hostId: "",
   }), [roomId])

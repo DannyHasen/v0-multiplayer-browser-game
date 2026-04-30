@@ -14,6 +14,10 @@ import type {
   BombState,
   StormState,
   ArenaEventState,
+  ControlZoneState,
+  DifficultyLevel,
+  GameMode,
+  MapTheme,
 } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
@@ -106,6 +110,95 @@ const ARENA_EVENT_FIRST_DELAY = 30000
 const ARENA_EVENT_INTERVAL = 36000
 const ARENA_EVENT_DURATION = 9000
 const MAX_BONUS_PICKUPS = 7
+const CONTROL_ZONE_RADIUS = 145
+const CONTROL_ZONE_POINTS_PER_SECOND = 8
+
+type ScoreSource = "pickup" | "combat" | "boss" | "survival" | "control"
+
+const DIFFICULTY_CONFIG: Record<DifficultyLevel, {
+  damageMultiplier: number
+  rewardMultiplier: number
+  speedMultiplier: number
+  eventIntervalMultiplier: number
+  meleeMultiplier: number
+  bossBonus: number
+  stormDamageMultiplier: number
+}> = {
+  casual: {
+    damageMultiplier: 0.82,
+    rewardMultiplier: 0.95,
+    speedMultiplier: 0.94,
+    eventIntervalMultiplier: 1.25,
+    meleeMultiplier: 0.75,
+    bossBonus: 0,
+    stormDamageMultiplier: 0.85,
+  },
+  standard: {
+    damageMultiplier: 1,
+    rewardMultiplier: 1,
+    speedMultiplier: 1,
+    eventIntervalMultiplier: 1,
+    meleeMultiplier: 1,
+    bossBonus: 0,
+    stormDamageMultiplier: 1,
+  },
+  hardcore: {
+    damageMultiplier: 1.18,
+    rewardMultiplier: 1.12,
+    speedMultiplier: 1.07,
+    eventIntervalMultiplier: 0.78,
+    meleeMultiplier: 1.35,
+    bossBonus: 1,
+    stormDamageMultiplier: 1.25,
+  },
+}
+
+const MODE_CONFIG: Record<GameMode, {
+  pickupMultiplier: number
+  combatMultiplier: number
+  bossMultiplier: number
+  survivalPointsPerSecond: number
+  controlMultiplier: number
+  deathPenaltyMultiplier: number
+  eventIntervalMultiplier: number
+}> = {
+  score: {
+    pickupMultiplier: 1,
+    combatMultiplier: 1,
+    bossMultiplier: 1,
+    survivalPointsPerSecond: 0,
+    controlMultiplier: 1,
+    deathPenaltyMultiplier: 1,
+    eventIntervalMultiplier: 1,
+  },
+  warden: {
+    pickupMultiplier: 0.65,
+    combatMultiplier: 1.1,
+    bossMultiplier: 1.65,
+    survivalPointsPerSecond: 0,
+    controlMultiplier: 0.8,
+    deathPenaltyMultiplier: 1,
+    eventIntervalMultiplier: 0.88,
+  },
+  survival: {
+    pickupMultiplier: 0.75,
+    combatMultiplier: 0.9,
+    bossMultiplier: 1.1,
+    survivalPointsPerSecond: 2.2,
+    controlMultiplier: 0.8,
+    deathPenaltyMultiplier: 1.45,
+    eventIntervalMultiplier: 1.05,
+  },
+  control: {
+    pickupMultiplier: 0.78,
+    combatMultiplier: 0.95,
+    bossMultiplier: 0.9,
+    survivalPointsPerSecond: 0,
+    controlMultiplier: 1.4,
+    deathPenaltyMultiplier: 1.1,
+    eventIntervalMultiplier: 0.95,
+  },
+}
 
 const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
   { nickname: "NeonBot", color: "magenta" },
@@ -153,8 +246,8 @@ function getPickupRespawnDelay(type: Pickup["type"]): number {
   }
 }
 
-function createDemoPickups(): Pickup[] {
-  return [
+function createDemoPickups(theme: MapTheme): Pickup[] {
+  const base: Pickup[] = [
     { id: "p1", type: "energy", x: 150, y: 150, collected: false },
     { id: "p2", type: "energy", x: ARENA_WIDTH - 150, y: 150, collected: false },
     { id: "p3", type: "energy", x: 150, y: ARENA_HEIGHT - 150, collected: false },
@@ -168,39 +261,145 @@ function createDemoPickups(): Pickup[] {
     { id: "p11", type: "magnet", x: ARENA_WIDTH / 2 - 145, y: ARENA_HEIGHT / 2 - 165, collected: false },
     { id: "p12", type: "multiplier", x: ARENA_WIDTH / 2 + 145, y: ARENA_HEIGHT / 2 - 165, collected: false },
   ]
+
+  switch (theme) {
+    case "neon":
+      return [
+        { id: "p1", type: "boost", x: 160, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p2", type: "boost", x: ARENA_WIDTH - 160, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p3", type: "energy", x: 250, y: 140, collected: false },
+        { id: "p4", type: "energy", x: ARENA_WIDTH - 250, y: ARENA_HEIGHT - 140, collected: false },
+        { id: "p5", type: "shield", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p6", type: "magnet", x: ARENA_WIDTH / 2, y: 130, collected: false },
+        { id: "p7", type: "heal", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 130, collected: false },
+        { id: "p8", type: "multiplier", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 + 185, collected: false },
+        { id: "p9", type: getRandomSpecialPickupType(), x: 355, y: 300, collected: false },
+        { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH - 355, y: 500, collected: false },
+        { id: "p11", type: "energy", x: 170, y: ARENA_HEIGHT - 150, collected: false },
+        { id: "p12", type: "energy", x: ARENA_WIDTH - 170, y: 150, collected: false },
+      ]
+    case "void":
+      return [
+        { id: "p1", type: "energy", x: 190, y: 175, collected: false },
+        { id: "p2", type: "energy", x: ARENA_WIDTH - 190, y: ARENA_HEIGHT - 175, collected: false },
+        { id: "p3", type: "shield", x: 210, y: ARENA_HEIGHT - 175, collected: false },
+        { id: "p4", type: "heal", x: ARENA_WIDTH - 210, y: 175, collected: false },
+        { id: "p5", type: "magnet", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p6", type: "multiplier", x: ARENA_WIDTH / 2, y: 150, collected: false },
+        { id: "p7", type: "boost", x: ARENA_WIDTH / 2 - 250, y: ARENA_HEIGHT / 2 + 130, collected: false },
+        { id: "p8", type: "boost", x: ARENA_WIDTH / 2 + 250, y: ARENA_HEIGHT / 2 - 130, collected: false },
+        { id: "p9", type: getRandomSpecialPickupType(), x: 350, y: 255, collected: false },
+        { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH - 350, y: ARENA_HEIGHT - 255, collected: false },
+        { id: "p11", type: "energy", x: 510, y: 610, collected: false },
+        { id: "p12", type: "maxHealth", x: 690, y: 190, collected: false },
+      ]
+    case "frost":
+      return [
+        { id: "p1", type: "shield", x: 170, y: 150, collected: false },
+        { id: "p2", type: "shield", x: ARENA_WIDTH - 170, y: ARENA_HEIGHT - 150, collected: false },
+        { id: "p3", type: "freeze", x: 170, y: ARENA_HEIGHT - 150, collected: false },
+        { id: "p4", type: "freeze", x: ARENA_WIDTH - 170, y: 150, collected: false },
+        { id: "p5", type: "heal", x: ARENA_WIDTH / 2 - 210, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p6", type: "heal", x: ARENA_WIDTH / 2 + 210, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p7", type: "energy", x: ARENA_WIDTH / 2, y: 135, collected: false },
+        { id: "p8", type: "maxHealth", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 135, collected: false },
+        { id: "p9", type: getRandomSpecialPickupType(), x: 365, y: 270, collected: false },
+        { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH - 365, y: ARENA_HEIGHT - 270, collected: false },
+        { id: "p11", type: "magnet", x: ARENA_WIDTH / 2 - 115, y: ARENA_HEIGHT / 2 - 135, collected: false },
+        { id: "p12", type: "multiplier", x: ARENA_WIDTH / 2 + 115, y: ARENA_HEIGHT / 2 + 135, collected: false },
+      ]
+    case "foundry":
+      return [
+        { id: "p1", type: "burn", x: 165, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p2", type: "bomb", x: ARENA_WIDTH - 165, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p3", type: "boost", x: ARENA_WIDTH / 2, y: 135, collected: false },
+        { id: "p4", type: "boost", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT - 135, collected: false },
+        { id: "p5", type: "shield", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p6", type: "heal", x: 250, y: 145, collected: false },
+        { id: "p7", type: "heal", x: ARENA_WIDTH - 250, y: ARENA_HEIGHT - 145, collected: false },
+        { id: "p8", type: "multiplier", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 + 190, collected: false },
+        { id: "p9", type: getRandomSpecialPickupType(), x: 370, y: 300, collected: false },
+        { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH - 370, y: 500, collected: false },
+        { id: "p11", type: "energy", x: 155, y: 155, collected: false },
+        { id: "p12", type: "maxHealth", x: ARENA_WIDTH - 155, y: ARENA_HEIGHT - 155, collected: false },
+      ]
+    case "garden":
+      return [
+        { id: "p1", type: "heal", x: 160, y: 150, collected: false },
+        { id: "p2", type: "heal", x: ARENA_WIDTH - 160, y: ARENA_HEIGHT - 150, collected: false },
+        { id: "p3", type: "maxHealth", x: 170, y: ARENA_HEIGHT - 150, collected: false },
+        { id: "p4", type: "shield", x: ARENA_WIDTH - 170, y: 150, collected: false },
+        { id: "p5", type: "energy", x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p6", type: "magnet", x: ARENA_WIDTH / 2, y: 150, collected: false },
+        { id: "p7", type: "boost", x: ARENA_WIDTH / 2 - 245, y: ARENA_HEIGHT / 2 + 145, collected: false },
+        { id: "p8", type: "boost", x: ARENA_WIDTH / 2 + 245, y: ARENA_HEIGHT / 2 - 145, collected: false },
+        { id: "p9", type: getRandomSpecialPickupType(), x: 355, y: 260, collected: false },
+        { id: "p10", type: getRandomSpecialPickupType(), x: ARENA_WIDTH - 355, y: ARENA_HEIGHT - 260, collected: false },
+        { id: "p11", type: "energy", x: 190, y: ARENA_HEIGHT / 2, collected: false },
+        { id: "p12", type: "multiplier", x: ARENA_WIDTH - 190, y: ARENA_HEIGHT / 2, collected: false },
+      ]
+    default:
+      return base
+  }
 }
 
-function createDemoHazards(): Hazard[] {
-  return [
-    { id: "h1", type: "static", x: 100, y: 100, width: 80, height: 80 },
-    { id: "h2", type: "static", x: ARENA_WIDTH - 180, y: 100, width: 80, height: 80 },
-    { id: "h3", type: "static", x: 100, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
-    { id: "h4", type: "static", x: ARENA_WIDTH - 180, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
-    {
-      id: "h5",
-      type: "moving",
-      x: ARENA_WIDTH / 2 - 30,
-      y: 150,
-      width: 60,
-      height: 60,
-      vx: 2.4,
-      vy: 0,
-      patternStartX: 220,
-      patternEndX: ARENA_WIDTH - 220,
-    },
-    {
-      id: "h6",
-      type: "moving",
-      x: 160,
-      y: ARENA_HEIGHT / 2 - 30,
-      width: 60,
-      height: 60,
-      vx: 0,
-      vy: 2.2,
-      patternStartY: 220,
-      patternEndY: ARENA_HEIGHT - 220,
-    },
-  ]
+function createDemoHazards(theme: MapTheme): Hazard[] {
+  switch (theme) {
+    case "neon":
+      return [
+        { id: "h1", type: "static", x: ARENA_WIDTH / 2 - 40, y: 105, width: 80, height: 115 },
+        { id: "h2", type: "static", x: ARENA_WIDTH / 2 - 40, y: ARENA_HEIGHT - 220, width: 80, height: 115 },
+        { id: "h3", type: "static", x: 100, y: ARENA_HEIGHT / 2 - 40, width: 115, height: 80 },
+        { id: "h4", type: "static", x: ARENA_WIDTH - 215, y: ARENA_HEIGHT / 2 - 40, width: 115, height: 80 },
+        { id: "h5", type: "moving", x: 260, y: 255, width: 70, height: 46, vx: 2.9, vy: 0, patternStartX: 215, patternEndX: ARENA_WIDTH - 215 },
+        { id: "h6", type: "moving", x: ARENA_WIDTH - 330, y: 500, width: 70, height: 46, vx: -2.9, vy: 0, patternStartX: 215, patternEndX: ARENA_WIDTH - 215 },
+      ]
+    case "void":
+      return [
+        { id: "h1", type: "static", x: 245, y: 155, width: 90, height: 90 },
+        { id: "h2", type: "static", x: 405, y: 300, width: 82, height: 82 },
+        { id: "h3", type: "static", x: ARENA_WIDTH - 335, y: ARENA_HEIGHT - 245, width: 90, height: 90 },
+        { id: "h4", type: "static", x: ARENA_WIDTH - 487, y: ARENA_HEIGHT - 382, width: 82, height: 82 },
+        { id: "h5", type: "moving", x: ARENA_WIDTH / 2 - 35, y: 130, width: 70, height: 70, vx: 0, vy: 2.5, patternStartY: 115, patternEndY: ARENA_HEIGHT - 115 },
+        { id: "h6", type: "moving", x: 190, y: ARENA_HEIGHT / 2 - 35, width: 70, height: 70, vx: 2.5, vy: 0, patternStartX: 160, patternEndX: ARENA_WIDTH - 160 },
+      ]
+    case "frost":
+      return [
+        { id: "h1", type: "static", x: ARENA_WIDTH / 2 - 185, y: ARENA_HEIGHT / 2 - 45, width: 120, height: 90 },
+        { id: "h2", type: "static", x: ARENA_WIDTH / 2 + 65, y: ARENA_HEIGHT / 2 - 45, width: 120, height: 90 },
+        { id: "h3", type: "static", x: ARENA_WIDTH / 2 - 45, y: ARENA_HEIGHT / 2 - 190, width: 90, height: 120 },
+        { id: "h4", type: "static", x: ARENA_WIDTH / 2 - 45, y: ARENA_HEIGHT / 2 + 70, width: 90, height: 120 },
+        { id: "h5", type: "moving", x: 185, y: 180, width: 56, height: 56, vx: 2.1, vy: 0, patternStartX: 150, patternEndX: ARENA_WIDTH - 150 },
+        { id: "h6", type: "moving", x: ARENA_WIDTH - 240, y: ARENA_HEIGHT - 236, width: 56, height: 56, vx: -2.1, vy: 0, patternStartX: 150, patternEndX: ARENA_WIDTH - 150 },
+      ]
+    case "foundry":
+      return [
+        { id: "h1", type: "static", x: 290, y: 80, width: 65, height: 250 },
+        { id: "h2", type: "static", x: ARENA_WIDTH - 355, y: ARENA_HEIGHT - 330, width: 65, height: 250 },
+        { id: "h3", type: "static", x: 485, y: ARENA_HEIGHT / 2 - 38, width: 230, height: 76 },
+        { id: "h4", type: "static", x: 85, y: ARENA_HEIGHT - 175, width: 190, height: 62 },
+        { id: "h5", type: "moving", x: 175, y: 250, width: 74, height: 74, vx: 3.1, vy: 0, patternStartX: 155, patternEndX: ARENA_WIDTH - 155 },
+        { id: "h6", type: "moving", x: ARENA_WIDTH - 250, y: 160, width: 74, height: 74, vx: 0, vy: 2.7, patternStartY: 140, patternEndY: ARENA_HEIGHT - 140 },
+      ]
+    case "garden":
+      return [
+        { id: "h1", type: "static", x: 230, y: 120, width: 75, height: 245 },
+        { id: "h2", type: "static", x: ARENA_WIDTH - 305, y: ARENA_HEIGHT - 365, width: 75, height: 245 },
+        { id: "h3", type: "static", x: 420, y: 205, width: 330, height: 58 },
+        { id: "h4", type: "static", x: 450, y: ARENA_HEIGHT - 263, width: 330, height: 58 },
+        { id: "h5", type: "moving", x: ARENA_WIDTH / 2 - 30, y: 115, width: 60, height: 60, vx: 0, vy: 2.05, patternStartY: 100, patternEndY: ARENA_HEIGHT - 100 },
+        { id: "h6", type: "moving", x: 160, y: ARENA_HEIGHT / 2 - 30, width: 60, height: 60, vx: 2.05, vy: 0, patternStartX: 140, patternEndX: ARENA_WIDTH - 140 },
+      ]
+    default:
+      return [
+        { id: "h1", type: "static", x: 100, y: 100, width: 80, height: 80 },
+        { id: "h2", type: "static", x: ARENA_WIDTH - 180, y: 100, width: 80, height: 80 },
+        { id: "h3", type: "static", x: 100, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
+        { id: "h4", type: "static", x: ARENA_WIDTH - 180, y: ARENA_HEIGHT - 180, width: 80, height: 80 },
+        { id: "h5", type: "moving", x: ARENA_WIDTH / 2 - 30, y: 150, width: 60, height: 60, vx: 2.4, vy: 0, patternStartX: 220, patternEndX: ARENA_WIDTH - 220 },
+        { id: "h6", type: "moving", x: 160, y: ARENA_HEIGHT / 2 - 30, width: 60, height: 60, vx: 0, vy: 2.2, patternStartY: 220, patternEndY: ARENA_HEIGHT - 220 },
+      ]
+  }
 }
 
 function circleRectCollide(
@@ -241,6 +440,7 @@ type DemoPlayerState = {
   scoreMultiplierUntil: number
   lastHazardHitTime: number
   lastStormHitTime: number
+  lastSurvivalScoreTime: number
   respawnInvulnerableUntil: number
   respawnAt: number | null
 }
@@ -251,7 +451,7 @@ type DamageResult = {
   amount: number
 }
 
-type AIBehaviorMode = "wander" | "collect" | "harass" | "avoid" | "ambush"
+type AIBehaviorMode = "wander" | "collect" | "harass" | "avoid" | "ambush" | "control"
 
 type AITarget = {
   x: number
@@ -284,6 +484,8 @@ export class DemoClient {
   private extraBossFireTimes: Map<string, number> = new Map()
   private lastArenaEventTime = 0
   private arenaEvent: ArenaEventState | null = null
+  private controlZone: ControlZoneState | null = null
+  private lastControlScoreTime = 0
   private bonusPickupCounter = 0
   
   // Player input state
@@ -315,8 +517,15 @@ export class DemoClient {
         maxPlayers: 8,
         matchDuration: MATCH.DEFAULT_DURATION,
         mapTheme: "cyber",
+        difficulty: "standard",
+        gameMode: "score",
       },
       hostId: "",
+    }
+    this.room.settings = {
+      ...this.room.settings,
+      difficulty: this.room.settings.difficulty ?? "standard",
+      gameMode: this.room.settings.gameMode ?? "score",
     }
     
     // Restore game start time if provided (for page navigation during game)
@@ -433,6 +642,9 @@ export class DemoClient {
       maxPlayers: settings.maxPlayers
         ? clamp(settings.maxPlayers, 2, 8)
         : this.room.settings.maxPlayers,
+      difficulty: settings.difficulty ?? this.room.settings.difficulty ?? "standard",
+      gameMode: settings.gameMode ?? this.room.settings.gameMode ?? "score",
+      mapTheme: settings.mapTheme ?? this.room.settings.mapTheme ?? "cyber",
     }
     this.trimBotsToMaxPlayers()
     this.messageHandler({ type: "room_state", room: { ...this.room } })
@@ -542,10 +754,10 @@ export class DemoClient {
       this.initializePlayerStates()
     }
     if (this.gamePickups.length === 0) {
-      this.gamePickups = createDemoPickups()
+      this.gamePickups = createDemoPickups(this.room.settings.mapTheme)
     }
     if (this.hazards.length === 0) {
-      this.hazards = createDemoHazards()
+      this.hazards = createDemoHazards(this.room.settings.mapTheme)
     }
     const now = Date.now()
     if (!this.boss) {
@@ -556,6 +768,8 @@ export class DemoClient {
     this.meleeEnemies = []
     this.bombs = []
     this.lastArenaEventTime = now
+    this.controlZone = null
+    this.lastControlScoreTime = now
     this.runGameLoop()
   }
 
@@ -565,8 +779,8 @@ export class DemoClient {
     this.playerStates.clear()
     this.aiTargets.clear()
     this.initializePlayerStates()
-    this.gamePickups = createDemoPickups()
-    this.hazards = createDemoHazards()
+    this.gamePickups = createDemoPickups(this.room.settings.mapTheme)
+    this.hazards = createDemoHazards(this.room.settings.mapTheme)
     this.projectiles = []
     const now = Date.now()
     this.boss = this.createBoss(0, now)
@@ -578,6 +792,8 @@ export class DemoClient {
     this.lastBossFireTime = now
     this.lastArenaEventTime = now
     this.arenaEvent = null
+    this.controlZone = null
+    this.lastControlScoreTime = now
     this.bonusPickupCounter = 0
     this.runGameLoop()
   }
@@ -612,6 +828,7 @@ export class DemoClient {
         scoreMultiplierUntil: 0,
         lastHazardHitTime: 0,
         lastStormHitTime: 0,
+        lastSurvivalScoreTime: Date.now(),
         respawnInvulnerableUntil: Date.now() + RESPAWN_INVULNERABILITY,
         respawnAt: null,
       })
@@ -735,7 +952,7 @@ export class DemoClient {
               this.boss.vy += Math.sin(angle) * 4
 
               if (this.boss.health <= 0) {
-                this.addScore(state, BOSS_KILL_REWARD, now)
+                this.addScore(state, BOSS_KILL_REWARD, now, "boss")
                 this.boss = this.createBoss()
                 this.lastBossFireTime = now + 1500
               }
@@ -753,7 +970,7 @@ export class DemoClient {
             boss.vy += Math.sin(angle) * 4
 
             if (boss.health <= 0) {
-              this.addScore(state, BOSS_KILL_REWARD, now)
+              this.addScore(state, BOSS_KILL_REWARD, now, "boss")
               this.extraBossFireTimes.delete(boss.id)
             }
 
@@ -859,6 +1076,8 @@ export class DemoClient {
           pickup.y = position.y
         }
       })
+
+      this.updateModeObjectives(now)
       
       // Build game state
       const gameState: GameState = {
@@ -897,6 +1116,7 @@ export class DemoClient {
         bombs: this.bombs.map(bomb => ({ ...bomb })),
         storm,
         arenaEvent: this.arenaEvent ? { ...this.arenaEvent } : null,
+        controlZone: this.controlZone ? { ...this.controlZone, holders: [...this.controlZone.holders] } : null,
         timeRemaining,
         matchState: "playing",
       }
@@ -923,6 +1143,65 @@ export class DemoClient {
     }, 1000 / 60) // 60 FPS updates
   }
 
+  private updateModeObjectives(now: number): void {
+    const modeConfig = this.getModeConfig()
+    if (modeConfig.survivalPointsPerSecond > 0) {
+      this.getLivingPlayerEntries().forEach(({ state }) => {
+        if (now - state.lastSurvivalScoreTime < 1000) return
+        const ticks = Math.floor((now - state.lastSurvivalScoreTime) / 1000)
+        state.lastSurvivalScoreTime += ticks * 1000
+        this.addScore(state, modeConfig.survivalPointsPerSecond * ticks, now, "survival")
+      })
+    }
+
+    if (this.room.settings.gameMode !== "control") {
+      this.controlZone = null
+      this.lastControlScoreTime = now
+      return
+    }
+
+    const zone = this.updateControlZone(now)
+    if (now - this.lastControlScoreTime < 1000) return
+
+    const ticks = Math.floor((now - this.lastControlScoreTime) / 1000)
+    this.lastControlScoreTime += ticks * 1000
+    if (zone.holders.length === 0) return
+
+    const contestedMultiplier = zone.contested ? 0.55 : 1
+    zone.holders.forEach((playerId) => {
+      this.addScore(
+        this.playerStates.get(playerId),
+        CONTROL_ZONE_POINTS_PER_SECOND * ticks * contestedMultiplier,
+        now,
+        "control"
+      )
+    })
+  }
+
+  private updateControlZone(now: number): ControlZoneState {
+    const elapsed = this.gameStartTime ? (now - this.gameStartTime) / 1000 : 0
+    const progress = this.getRoundProgress(now)
+    const orbitScale = 0.55 + progress * 0.45
+    const x = ARENA_WIDTH / 2 + Math.cos(elapsed * 0.32) * 260 * orbitScale
+    const y = ARENA_HEIGHT / 2 + Math.sin(elapsed * 0.24) * 175 * orbitScale
+    const radius = CONTROL_ZONE_RADIUS - progress * 22
+    const holders = this.getLivingPlayerEntries()
+      .filter(({ state }) => Math.hypot(state.x - x, state.y - y) <= radius)
+      .map(({ player }) => player.id)
+
+    this.controlZone = {
+      x,
+      y,
+      radius,
+      active: true,
+      contested: holders.length > 1,
+      holders,
+      pointsPerSecond: Math.round(CONTROL_ZONE_POINTS_PER_SECOND * this.getModeConfig().controlMultiplier),
+    }
+
+    return this.controlZone
+  }
+
   private getRoundProgress(now: number): number {
     if (!this.gameStartTime || this.room.settings.matchDuration <= 0) return 0
 
@@ -930,16 +1209,24 @@ export class DemoClient {
     return clamp(elapsed / this.room.settings.matchDuration, 0, 1)
   }
 
+  private getDifficultyConfig() {
+    return DIFFICULTY_CONFIG[this.room.settings.difficulty ?? "standard"]
+  }
+
+  private getModeConfig() {
+    return MODE_CONFIG[this.room.settings.gameMode ?? "score"]
+  }
+
   private scaleDamage(base: number, now: number): number {
-    return Math.max(1, Math.round(base * (1 + this.getRoundProgress(now) * ROUND_DAMAGE_SCALE)))
+    return Math.max(1, Math.round(base * this.getDifficultyConfig().damageMultiplier * (1 + this.getRoundProgress(now) * ROUND_DAMAGE_SCALE)))
   }
 
   private scaleReward(base: number, now: number): number {
-    return Math.max(1, Math.round(base * (1 + this.getRoundProgress(now) * ROUND_REWARD_SCALE)))
+    return Math.max(1, Math.round(base * this.getDifficultyConfig().rewardMultiplier * (1 + this.getRoundProgress(now) * ROUND_REWARD_SCALE)))
   }
 
   private scaleSpeed(base: number, now: number): number {
-    return base * (1 + this.getRoundProgress(now) * ROUND_SPEED_SCALE)
+    return base * this.getDifficultyConfig().speedMultiplier * (1 + this.getRoundProgress(now) * ROUND_SPEED_SCALE)
   }
 
   private getStormState(now: number): StormState | null {
@@ -993,10 +1280,17 @@ export class DemoClient {
     )
   }
 
-  private addScore(state: DemoPlayerState | undefined, base: number, now: number): number {
+  private addScore(state: DemoPlayerState | undefined, base: number, now: number, source: ScoreSource = "combat"): number {
     if (!state) return 0
 
-    const points = Math.round(this.scaleReward(base, now) * this.getScoreMultiplier(state, now))
+    const modeConfig = this.getModeConfig()
+    const sourceMultiplier =
+      source === "pickup" ? modeConfig.pickupMultiplier :
+      source === "boss" ? modeConfig.bossMultiplier :
+      source === "survival" ? 1 :
+      source === "control" ? modeConfig.controlMultiplier :
+      modeConfig.combatMultiplier
+    const points = Math.round(this.scaleReward(base, now) * sourceMultiplier * this.getScoreMultiplier(state, now))
     state.score += points
     return points
   }
@@ -1036,12 +1330,16 @@ export class DemoClient {
 
   private getDesiredBossCount(now: number): number {
     const progress = this.getRoundProgress(now)
-    let count = MIN_BOSS_COUNT
+    const mode = this.room.settings.gameMode ?? "score"
+    let count = MIN_BOSS_COUNT + this.getDifficultyConfig().bossBonus
 
     if (this.room.settings.matchDuration >= 240 && progress > 0.45) {
       count += 1
     }
     if ((this.room.settings.matchDuration >= 300 || this.room.players.length >= 5) && progress > 0.72) {
+      count += 1
+    }
+    if (mode === "warden" && progress > 0.25) {
       count += 1
     }
 
@@ -1240,7 +1538,8 @@ export class DemoClient {
       this.arenaEvent = null
     }
 
-    if (elapsed * 1000 < ARENA_EVENT_FIRST_DELAY || now - this.lastArenaEventTime < ARENA_EVENT_INTERVAL) {
+    const eventInterval = ARENA_EVENT_INTERVAL * this.getDifficultyConfig().eventIntervalMultiplier * this.getModeConfig().eventIntervalMultiplier
+    if (elapsed * 1000 < ARENA_EVENT_FIRST_DELAY || now - this.lastArenaEventTime < eventInterval) {
       return
     }
 
@@ -1390,7 +1689,9 @@ export class DemoClient {
 
   private updateMeleeEnemies(now: number, elapsed: number): void {
     const elapsedRatio = elapsed / this.room.settings.matchDuration
-    const desiredCount = MELEE_SPAWN_RATIOS.filter((ratio) => elapsedRatio >= ratio).length
+    const baseDesiredCount = MELEE_SPAWN_RATIOS.filter((ratio) => elapsedRatio >= ratio).length
+    const modeBonus = (this.room.settings.gameMode === "survival" && elapsedRatio > 0.68) ? 1 : 0
+    const desiredCount = clamp(Math.ceil(baseDesiredCount * this.getDifficultyConfig().meleeMultiplier) + modeBonus, 0, 5)
     const meleeSpeed = this.scaleSpeed(MELEE_SPEED, now)
 
     while (this.meleeEnemies.length < desiredCount) {
@@ -1517,7 +1818,7 @@ export class DemoClient {
           this.boss.health = Math.max(0, this.boss.health - this.scaleDamage(BOMB_DAMAGE, now))
           this.addScore(ownerState, 75, now)
           if (this.boss.health <= 0) {
-            this.addScore(ownerState, BOSS_KILL_REWARD, now)
+            this.addScore(ownerState, BOSS_KILL_REWARD, now, "boss")
             this.boss = this.createBoss()
             this.lastBossFireTime = now + 1500
           }
@@ -1531,7 +1832,7 @@ export class DemoClient {
         boss.health = Math.max(0, boss.health - this.scaleDamage(BOMB_DAMAGE, now))
         this.addScore(ownerState, 75, now)
         if (boss.health <= 0) {
-          this.addScore(ownerState, BOSS_KILL_REWARD, now)
+          this.addScore(ownerState, BOSS_KILL_REWARD, now, "boss")
           this.extraBossFireTimes.delete(boss.id)
         }
 
@@ -1582,7 +1883,7 @@ export class DemoClient {
       }
     })()
 
-    const points = this.scaleReward(basePoints, now)
+    const points = this.scaleReward(basePoints, now) * this.getModeConfig().pickupMultiplier
     return state ? Math.round(points * this.getScoreMultiplier(state, now)) : points
   }
 
@@ -1643,10 +1944,16 @@ export class DemoClient {
         })
         if (this.boss) {
           this.boss.health = Math.max(0, this.boss.health - this.scaleDamage(45, now))
+          if (this.boss.health <= 0) {
+            this.addScore(state, BOSS_KILL_REWARD, now, "boss")
+            this.boss = this.createBoss(0, now)
+            this.lastBossFireTime = now + 1500
+          }
         }
         this.extraBosses = this.extraBosses.filter((boss) => {
           boss.health = Math.max(0, boss.health - this.scaleDamage(45, now))
           if (boss.health <= 0) {
+            this.addScore(state, BOSS_KILL_REWARD, now, "boss")
             this.extraBossFireTimes.delete(boss.id)
           }
           return boss.health > 0
@@ -1763,7 +2070,7 @@ export class DemoClient {
     state.vy = Math.sin(angle) * 6
     state.x = clamp(state.x + Math.cos(angle) * 18, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
     state.y = clamp(state.y + Math.sin(angle) * 18, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
-    this.damagePlayer(playerId, state, STORM_DAMAGE, now, "storm")
+    this.damagePlayer(playerId, state, STORM_DAMAGE * this.getDifficultyConfig().stormDamageMultiplier, now, "storm")
   }
 
   private damagePlayer(playerId: string, state: DemoPlayerState, damage: number, now: number, attackerId: string): DamageResult {
@@ -1805,7 +2112,8 @@ export class DemoClient {
     state.lastStormHitTime = 0
     state.respawnAt = now + RESPAWN_DELAY
     state.respawnInvulnerableUntil = 0
-    state.score = Math.max(0, state.score - DEATH_SCORE_PENALTY)
+    state.lastSurvivalScoreTime = now
+    state.score = Math.max(0, state.score - Math.round(DEATH_SCORE_PENALTY * this.getModeConfig().deathPenaltyMultiplier))
   }
 
   private finishRespawn(state: DemoPlayerState, now: number): void {
@@ -1824,6 +2132,7 @@ export class DemoClient {
     state.magnetUntil = 0
     state.scoreMultiplierUntil = 0
     state.lastStormHitTime = 0
+    state.lastSurvivalScoreTime = now
     state.respawnAt = null
     state.respawnInvulnerableUntil = now + RESPAWN_INVULNERABILITY
   }
@@ -1845,6 +2154,8 @@ export class DemoClient {
     this.extraBossFireTimes.clear()
     this.lastArenaEventTime = 0
     this.arenaEvent = null
+    this.controlZone = null
+    this.lastControlScoreTime = 0
     this.bonusPickupCounter = 0
     this.currentInput = {
       up: false,
@@ -2037,6 +2348,16 @@ export class DemoClient {
     let mode: AIBehaviorMode = "wander"
     const roll = Math.random()
 
+    if (this.room.settings.gameMode === "control" && !lowHealth && roll < 0.68) {
+      const zone = this.controlZone ?? this.updateControlZone(now)
+      return {
+        x: clamp(zone.x + (Math.random() - 0.5) * zone.radius * 0.7, 70, ARENA_WIDTH - 70),
+        y: clamp(zone.y + (Math.random() - 0.5) * zone.radius * 0.7, 70, ARENA_HEIGHT - 70),
+        changeAt: now + 1600 + Math.random() * 1200,
+        mode: "control",
+      }
+    }
+
     if (pickup && (lowHealth || roll < [0.26, 0.58, 0.34, 0.42][personality])) {
       mode = "collect"
     } else if (roll < [0.46, 0.18, 0.28, 0.22][personality]) {
@@ -2079,6 +2400,16 @@ export class DemoClient {
   }
 
   private resolveAITarget(target: AITarget, index: number, now: number): { x: number; y: number } {
+    if (target.mode === "control") {
+      const zone = this.controlZone ?? this.updateControlZone(now)
+      const orbitAngle = (index + 1) * 1.33 + now / 1800
+      const orbitDistance = zone.radius * 0.35
+      return {
+        x: clamp(zone.x + Math.cos(orbitAngle) * orbitDistance, 70, ARENA_WIDTH - 70),
+        y: clamp(zone.y + Math.sin(orbitAngle) * orbitDistance, 70, ARENA_HEIGHT - 70),
+      }
+    }
+
     if (target.pickupId) {
       const pickup = this.gamePickups.find((candidate) => candidate.id === target.pickupId && !candidate.collected)
       if (pickup) {
@@ -2145,7 +2476,7 @@ export class DemoClient {
     if (dangerTarget && dangerTarget.urgency > 0.62 && now - state.lastDashTime > DASH_COOLDOWN) {
       shouldDash = true
     } else if (
-      aiTarget.mode === "collect" &&
+      (aiTarget.mode === "collect" || aiTarget.mode === "control") &&
       distanceToTarget > 95 &&
       distanceToTarget < 300 &&
       Math.random() < 0.012 &&
@@ -2172,7 +2503,7 @@ export class DemoClient {
 
     const dx = targetX - state.x
     const dy = targetY - state.y
-    const deadzone = aiTarget.mode === "collect" ? 24 : 34
+    const deadzone = aiTarget.mode === "collect" ? 24 : aiTarget.mode === "control" ? 54 : 34
     
     return {
       up: dy < -deadzone,
