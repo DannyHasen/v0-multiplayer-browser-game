@@ -34,6 +34,7 @@ export type GameClient = {
   leave: () => void
   updateSettings: (settings: Partial<RoomSettings>) => void
   fillWithBots: () => number
+  kickPlayer: (playerId: string) => void
   resetToLobby: () => void
   getRoom: () => Room
   readonly isConnected: boolean

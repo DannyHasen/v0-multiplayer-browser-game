@@ -1,7 +1,7 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Crown, Check, Wifi, WifiOff } from "lucide-react"
+import { Crown, Check, UserX, Wifi, WifiOff } from "lucide-react"
 import { PLAYER_COLORS, type Player } from "@/types/game"
 import { cn } from "@/lib/utils"
 
@@ -10,9 +10,11 @@ interface PlayerListProps {
   currentPlayerId: string | null
   hostId: string
   maxPlayers: number
+  isHost: boolean
+  onKickPlayer?: (player: Player) => void
 }
 
-export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: PlayerListProps) {
+export function PlayerList({ players, currentPlayerId, hostId, maxPlayers, isHost, onKickPlayer }: PlayerListProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-4">
@@ -23,8 +25,11 @@ export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: Pla
       </div>
 
       <AnimatePresence mode="popLayout">
-        {players.map((player, index) => (
-          <motion.div
+        {players.map((player, index) => {
+          const canKick = isHost && player.id !== hostId && player.id !== currentPlayerId
+
+          return (
+            <motion.div
             key={player.id}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -36,7 +41,7 @@ export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: Pla
                 ? "bg-secondary/50 border-primary/50"
                 : "bg-card/50 border-border"
             )}
-          >
+            >
             {/* Avatar */}
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold"
@@ -61,6 +66,17 @@ export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: Pla
                 {player.id === hostId && (
                   <Crown className="w-4 h-4 text-yellow-500" />
                 )}
+                {canKick && (
+                  <button
+                    type="button"
+                    onClick={() => onKickPlayer?.(player)}
+                    className="pointer-events-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-destructive/40 bg-destructive/10 text-destructive transition-colors hover:bg-destructive/20"
+                    title={`Kick ${player.nickname}`}
+                    aria-label={`Kick ${player.nickname}`}
+                  >
+                    <UserX className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 {player.connected ? (
@@ -77,23 +93,26 @@ export function PlayerList({ players, currentPlayerId, hostId, maxPlayers }: Pla
               </div>
             </div>
 
-            {/* Ready status */}
-            <div
-              className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center transition-all",
-                player.isReady
-                  ? "bg-green-500/20 text-green-500"
-                  : "bg-muted text-muted-foreground"
-              )}
-            >
-              {player.isReady ? (
-                <Check className="w-5 h-5" />
-              ) : (
-                <div className="w-2 h-2 rounded-full bg-current animate-pulse" />
-              )}
-            </div>
-          </motion.div>
-        ))}
+              <div className="flex items-center gap-2">
+                {/* Ready status */}
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center transition-all",
+                    player.isReady
+                      ? "bg-green-500/20 text-green-500"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {player.isReady ? (
+                    <Check className="w-5 h-5" />
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-current animate-pulse" />
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )
+        })}
       </AnimatePresence>
 
       {/* Empty slots */}

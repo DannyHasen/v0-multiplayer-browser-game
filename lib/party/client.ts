@@ -133,6 +133,10 @@ export class PartyClient {
     return openSlots
   }
 
+  kickPlayer(playerId: string): void {
+    this.send({ type: "kick", playerId })
+  }
+
   resetToLobby(): void {
     this.send({ type: "reset" })
   }

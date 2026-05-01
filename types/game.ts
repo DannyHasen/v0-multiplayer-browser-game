@@ -87,6 +87,7 @@ export interface GameState {
   storm?: StormState | null
   arenaEvent?: ArenaEventState | null
   controlZone?: ControlZoneState | null
+  bountyPlayerId?: string | null
   timeRemaining: number
   matchState: RoomState
 }
@@ -229,6 +230,7 @@ export type ClientMessage =
   | { type: "settings"; settings: Partial<RoomSettings> }
   | { type: "start" }
   | { type: "fill_bots" }
+  | { type: "kick"; playerId: string }
   | { type: "input"; input: InputState; sequenceNumber: number }
   | { type: "reset" }
   | { type: "leave" }

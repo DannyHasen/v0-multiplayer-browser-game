@@ -86,7 +86,7 @@ export function render(
   drawTrails(renderCtx, gameState.players)
   drawBosses(renderCtx, gameState.bosses ?? (gameState.boss ? [gameState.boss] : []))
   drawMeleeEnemies(renderCtx, gameState.meleeEnemies ?? [])
-  drawPlayers(renderCtx, gameState.players, currentPlayerId)
+  drawPlayers(renderCtx, gameState.players, currentPlayerId, gameState.bountyPlayerId ?? null)
   drawEffects(renderCtx, gameState.players)
 }
 
@@ -580,7 +580,7 @@ function drawTrails(ctx: RenderContext, players: Player[]) {
   })
 }
 
-function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: string | null) {
+function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: string | null, bountyPlayerId: string | null) {
   // Sort so current player is drawn last (on top)
   const sortedPlayers = [...players].sort((a, b) => {
     if (a.id === currentPlayerId) return 1
@@ -594,6 +594,7 @@ function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: str
     const size = PLAYER.SIZE * ctx.scale
     const color = PLAYER_COLORS[player.color]
     const isCurrentPlayer = player.id === currentPlayerId
+    const isBounty = player.id === bountyPlayerId
 
     // Direction indicator
     const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy)
@@ -614,6 +615,20 @@ function drawPlayers(ctx: RenderContext, players: Player[], currentPlayerId: str
     // Outer glow
     ctx.ctx.shadowColor = color
     ctx.ctx.shadowBlur = isCurrentPlayer ? 25 : 15
+
+    if (isBounty && !player.isRespawning) {
+      const bountyPulse = Math.sin(ctx.time * 0.008) * 0.18 + 0.82
+      ctx.ctx.save()
+      ctx.ctx.rotate(-angle)
+      ctx.ctx.beginPath()
+      ctx.ctx.arc(0, 0, size * 1.75, 0, Math.PI * 2)
+      ctx.ctx.strokeStyle = `rgba(255, 207, 90, ${0.85 * bountyPulse})`
+      ctx.ctx.lineWidth = 3
+      ctx.ctx.shadowColor = "#ffcf5a"
+      ctx.ctx.shadowBlur = 20
+      ctx.ctx.stroke()
+      ctx.ctx.restore()
+    }
 
     // Main body (hexagon-ish shape)
     ctx.ctx.beginPath()

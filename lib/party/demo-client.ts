@@ -19,6 +19,7 @@ import type {
   GameMode,
   MapTheme,
 } from "@/types/game"
+import { PLAYER_COLORS } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 
 export type MessageHandler = (message: ServerMessage) => void
@@ -112,6 +113,10 @@ const ARENA_EVENT_DURATION = 9000
 const MAX_BONUS_PICKUPS = 7
 const CONTROL_ZONE_RADIUS = 145
 const CONTROL_ZONE_POINTS_PER_SECOND = 8
+const BOUNTY_SCORE_LEAD = 340
+const BOUNTY_MIN_SCORE = 500
+const BOUNTY_REWARD = 225
+const BOUNTY_CHECK_INTERVAL = 1500
 
 type ScoreSource = "pickup" | "combat" | "boss" | "survival" | "control"
 
@@ -209,6 +214,7 @@ const BOT_PROFILES: Array<{ nickname: string; color: PlayerColor }> = [
   { nickname: "TurboHex", color: "teal" },
   { nickname: "VoidRunner", color: "purple" },
 ]
+const BOT_COLOR_ORDER = Object.keys(PLAYER_COLORS) as PlayerColor[]
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
@@ -451,7 +457,7 @@ type DamageResult = {
   amount: number
 }
 
-type AIBehaviorMode = "wander" | "collect" | "harass" | "avoid" | "ambush" | "control"
+type AIBehaviorMode = "wander" | "collect" | "harass" | "avoid" | "ambush" | "control" | "boss"
 
 type AITarget = {
   x: number
@@ -460,6 +466,7 @@ type AITarget = {
   mode: AIBehaviorMode
   targetId?: string
   pickupId?: string
+  bossId?: string
 }
 
 export class DemoClient {
@@ -486,6 +493,8 @@ export class DemoClient {
   private arenaEvent: ArenaEventState | null = null
   private controlZone: ControlZoneState | null = null
   private lastControlScoreTime = 0
+  private bountyPlayerId: string | null = null
+  private lastBountyCheckTime = 0
   private bonusPickupCounter = 0
   
   // Player input state
@@ -659,6 +668,9 @@ export class DemoClient {
     if (nextBotIndex === -1) return false
 
     const profile = BOT_PROFILES[nextBotIndex]
+    const color = this.getAvailableBotColor()
+    if (!color) return false
+
     const botId = `bot-${profile.nickname.toLowerCase()}-${this.roomId}`
     if (this.room.players.some((player) => player.id === botId)) return false
 
@@ -666,7 +678,7 @@ export class DemoClient {
     const botPlayer: Player = {
       id: botId,
       nickname: profile.nickname,
-      color: profile.color,
+      color,
       x: 200 + (botNumber % 4) * 220,
       y: 200 + Math.floor(botNumber / 4) * 180,
       vx: 0,
@@ -698,6 +710,21 @@ export class DemoClient {
     return added
   }
 
+  kickPlayer(playerId: string): void {
+    if (this.room.state !== "lobby") return
+    if (this.room.hostId !== this._playerId) return
+    if (playerId === this.room.hostId) return
+
+    const kicked = this.room.players.find((player) => player.id === playerId)
+    if (!kicked) return
+
+    this.room.players = this.room.players.filter((player) => player.id !== playerId)
+    this.playerStates.delete(playerId)
+    this.aiTargets.delete(playerId)
+    this.messageHandler({ type: "player_left", playerId })
+    this.messageHandler({ type: "room_state", room: { ...this.room } })
+  }
+
   private getBotCount(): number {
     return this.room.players.filter((player) => player.id.startsWith("bot-")).length
   }
@@ -706,6 +733,11 @@ export class DemoClient {
     return BOT_PROFILES.findIndex((profile) =>
       !this.room.players.some((player) => player.id === `bot-${profile.nickname.toLowerCase()}-${this.roomId}`)
     )
+  }
+
+  private getAvailableBotColor(): PlayerColor | null {
+    const usedColors = new Set(this.room.players.map((player) => player.color))
+    return BOT_COLOR_ORDER.find((color) => !usedColors.has(color)) ?? null
   }
 
   private trimBotsToMaxPlayers(): void {
@@ -770,6 +802,8 @@ export class DemoClient {
     this.lastArenaEventTime = now
     this.controlZone = null
     this.lastControlScoreTime = now
+    this.bountyPlayerId = null
+    this.lastBountyCheckTime = now
     this.runGameLoop()
   }
 
@@ -794,6 +828,8 @@ export class DemoClient {
     this.arenaEvent = null
     this.controlZone = null
     this.lastControlScoreTime = now
+    this.bountyPlayerId = null
+    this.lastBountyCheckTime = now
     this.bonusPickupCounter = 0
     this.runGameLoop()
   }
@@ -1078,6 +1114,7 @@ export class DemoClient {
       })
 
       this.updateModeObjectives(now)
+      this.updateBountyTarget(now)
       
       // Build game state
       const gameState: GameState = {
@@ -1117,6 +1154,7 @@ export class DemoClient {
         storm,
         arenaEvent: this.arenaEvent ? { ...this.arenaEvent } : null,
         controlZone: this.controlZone ? { ...this.controlZone, holders: [...this.controlZone.holders] } : null,
+        bountyPlayerId: this.bountyPlayerId,
         timeRemaining,
         matchState: "playing",
       }
@@ -1200,6 +1238,46 @@ export class DemoClient {
     }
 
     return this.controlZone
+  }
+
+  private updateBountyTarget(now: number): void {
+    if (now - this.lastBountyCheckTime < BOUNTY_CHECK_INTERVAL) return
+    this.lastBountyCheckTime = now
+
+    const contenders = this.getLivingPlayerEntries().sort((a, b) => b.state.score - a.state.score)
+    if (contenders.length < 2) {
+      this.bountyPlayerId = null
+      return
+    }
+
+    const [leader, runnerUp] = contenders
+    const lead = leader.state.score - runnerUp.state.score
+    const currentBounty = contenders.find(({ player }) => player.id === this.bountyPlayerId)
+    if (currentBounty && currentBounty.state.score - runnerUp.state.score > BOUNTY_SCORE_LEAD * 0.6) {
+      return
+    }
+
+    this.bountyPlayerId = leader.state.score >= BOUNTY_MIN_SCORE && lead >= BOUNTY_SCORE_LEAD
+      ? leader.player.id
+      : null
+  }
+
+  private claimBounty(targetPlayerId: string, attackerId: string, now: number): void {
+    if (this.bountyPlayerId !== targetPlayerId || attackerId === targetPlayerId) return
+
+    const attackerState = this.playerStates.get(attackerId)
+    if (!attackerState) return
+
+    this.addScore(attackerState, BOUNTY_REWARD, now, "combat")
+    this.bountyPlayerId = null
+    this.lastBountyCheckTime = now
+    this.arenaEvent = {
+      id: `bounty-${now}`,
+      name: "Bounty Claimed",
+      description: "The arena leader was shut down for bonus points.",
+      endsAt: now + ARENA_EVENT_DURATION,
+      tone: "danger",
+    }
   }
 
   private getRoundProgress(now: number): number {
@@ -2090,6 +2168,7 @@ export class DemoClient {
     })
 
     if (eliminated) {
+      this.claimBounty(playerId, attackerId, now)
       this.startRespawn(state, now)
     }
 
@@ -2156,6 +2235,8 @@ export class DemoClient {
     this.arenaEvent = null
     this.controlZone = null
     this.lastControlScoreTime = 0
+    this.bountyPlayerId = null
+    this.lastBountyCheckTime = 0
     this.bonusPickupCounter = 0
     this.currentInput = {
       up: false,
@@ -2276,6 +2357,7 @@ export class DemoClient {
   private getBestAIPickup(state: DemoPlayerState, personality: number): Pickup | null {
     let bestPickup: Pickup | null = null
     let bestScore = Number.NEGATIVE_INFINITY
+    const gameMode = this.room.settings.gameMode ?? "score"
 
     this.gamePickups.forEach((pickup) => {
       if (pickup.collected) return
@@ -2286,26 +2368,33 @@ export class DemoClient {
       switch (pickup.type) {
         case "heal":
           value += state.health < state.maxHealth * 0.7 ? 85 : 8
+          if (gameMode === "survival") value += 26
           break
         case "maxHealth":
           value += state.maxHealth < MAX_HEALTH_CAP ? 62 : 6
+          if (gameMode === "survival") value += 18
           break
         case "shield":
           value += state.health < state.maxHealth * 0.55 ? 45 : 24
+          if (gameMode === "control" || gameMode === "survival") value += 20
           break
         case "freeze":
         case "burn":
         case "bomb":
           value += personality === 0 ? 44 : 34
+          if (gameMode === "control") value += pickup.type === "freeze" || pickup.type === "bomb" ? 28 : 12
+          if (gameMode === "warden") value += pickup.type === "burn" || pickup.type === "bomb" ? 30 : 10
           break
         case "boost":
           value += personality === 1 ? 38 : 28
+          if (gameMode === "control") value += 12
           break
         case "magnet":
           value += personality === 1 ? 42 : 30
           break
         case "multiplier":
           value += personality === 2 ? 54 : 40
+          if (gameMode === "warden" || gameMode === "survival") value += 18
           break
         default:
           value += 20
@@ -2331,8 +2420,10 @@ export class DemoClient {
       return candidateDistance < bestDistance ? candidate : best
     }, candidates[0])
     const human = candidates.find((candidate) => candidate.player.id === this._playerId)
+    const bounty = candidates.find((candidate) => candidate.player.id === this.bountyPlayerId)
 
     const roll = Math.random()
+    if (bounty && roll < 0.5) return bounty
     if (leader && roll < 0.36) return leader
     if (nearest && roll < 0.7) return nearest
     if (human && roll < 0.84) return human
@@ -2340,9 +2431,23 @@ export class DemoClient {
     return candidates[Math.floor(Math.random() * candidates.length)]
   }
 
+  private getAIBossTarget(state: DemoPlayerState): BossState | null {
+    const bosses = this.getAllBosses().filter((boss) => boss.health > 0)
+    if (bosses.length === 0) return null
+
+    return bosses.reduce((best, boss) => {
+      const bestDistance = Math.hypot(best.x - state.x, best.y - state.y)
+      const bossDistance = Math.hypot(boss.x - state.x, boss.y - state.y)
+      const bestScore = (1 - best.health / best.maxHealth) * 210 - bestDistance / 9
+      const bossScore = (1 - boss.health / boss.maxHealth) * 210 - bossDistance / 9
+      return bossScore > bestScore ? boss : best
+    }, bosses[0])
+  }
+
   private chooseAITarget(playerId: string, index: number, state: DemoPlayerState, now: number): AITarget {
     const personality = index % 4
     const pickup = this.getBestAIPickup(state, personality)
+    const bossTarget = this.getAIBossTarget(state)
     const lowHealth = state.health < state.maxHealth * 0.62
 
     let mode: AIBehaviorMode = "wander"
@@ -2355,6 +2460,26 @@ export class DemoClient {
         y: clamp(zone.y + (Math.random() - 0.5) * zone.radius * 0.7, 70, ARENA_HEIGHT - 70),
         changeAt: now + 1600 + Math.random() * 1200,
         mode: "control",
+      }
+    }
+
+    if (
+      bossTarget &&
+      !lowHealth &&
+      (
+        this.room.settings.gameMode === "warden"
+          ? roll < 0.72
+          : roll < 0.16 || bossTarget.health < bossTarget.maxHealth * 0.28
+      )
+    ) {
+      const angle = Math.atan2(state.y - bossTarget.y, state.x - bossTarget.x) || (index + 1) * 0.9
+      const distance = SHOCKWAVE_RADIUS + BOSS_RADIUS - 18
+      return {
+        x: clamp(bossTarget.x + Math.cos(angle) * distance, 70, ARENA_WIDTH - 70),
+        y: clamp(bossTarget.y + Math.sin(angle) * distance, 70, ARENA_HEIGHT - 70),
+        changeAt: now + 1600 + Math.random() * 1000,
+        mode: "boss",
+        bossId: bossTarget.id,
       }
     }
 
@@ -2417,6 +2542,18 @@ export class DemoClient {
       }
     }
 
+    if (target.bossId) {
+      const boss = this.getAllBosses().find((candidate) => candidate.id === target.bossId && candidate.health > 0)
+      if (boss) {
+        const orbitAngle = (index + 1) * 1.17 + now / 1900
+        const orbitDistance = SHOCKWAVE_RADIUS + BOSS_RADIUS - 22
+        return {
+          x: clamp(boss.x + Math.cos(orbitAngle) * orbitDistance, 70, ARENA_WIDTH - 70),
+          y: clamp(boss.y + Math.sin(orbitAngle) * orbitDistance, 70, ARENA_HEIGHT - 70),
+        }
+      }
+    }
+
     if (target.targetId) {
       const targetState = this.playerStates.get(target.targetId)
       if (targetState && !targetState.respawnAt) {
@@ -2466,7 +2603,12 @@ export class DemoClient {
       this.aiTargets.set(playerId, aiTarget)
     }
 
-    const resolvedTarget = dangerTarget ?? this.resolveAITarget(aiTarget, index, now)
+    const shouldFlee = Boolean(
+      dangerTarget &&
+      !(aiTarget.mode === "boss" && dangerTarget.urgency < 0.82) &&
+      !(aiTarget.mode === "control" && dangerTarget.urgency < 0.58)
+    )
+    const resolvedTarget = shouldFlee ? dangerTarget! : this.resolveAITarget(aiTarget, index, now)
     let targetX = resolvedTarget.x
     let targetY = resolvedTarget.y
     let shouldDash = false
@@ -2476,7 +2618,7 @@ export class DemoClient {
     if (dangerTarget && dangerTarget.urgency > 0.62 && now - state.lastDashTime > DASH_COOLDOWN) {
       shouldDash = true
     } else if (
-      (aiTarget.mode === "collect" || aiTarget.mode === "control") &&
+      (aiTarget.mode === "collect" || aiTarget.mode === "control" || aiTarget.mode === "boss") &&
       distanceToTarget > 95 &&
       distanceToTarget < 300 &&
       Math.random() < 0.012 &&
@@ -2494,7 +2636,7 @@ export class DemoClient {
     }
 
     if (now - state.lastAbilityTime > ABILITY_COOLDOWN && this.hasAIAttackTargetNearby(playerId, state)) {
-      shouldAbility = Math.random() < (aiTarget.mode === "harass" ? 0.018 : 0.01)
+      shouldAbility = Math.random() < (aiTarget.mode === "boss" ? 0.04 : aiTarget.mode === "harass" ? 0.018 : 0.012)
     }
 
     // Clamp target to arena
@@ -2503,7 +2645,7 @@ export class DemoClient {
 
     const dx = targetX - state.x
     const dy = targetY - state.y
-    const deadzone = aiTarget.mode === "collect" ? 24 : aiTarget.mode === "control" ? 54 : 34
+    const deadzone = aiTarget.mode === "collect" ? 24 : aiTarget.mode === "control" ? 54 : aiTarget.mode === "boss" ? 42 : 34
     
     return {
       up: dy < -deadzone,

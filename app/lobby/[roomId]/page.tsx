@@ -18,7 +18,7 @@ import {
   getGameClient,
   getGameClientPlayerId,
 } from "@/lib/party/session-client"
-import type { ServerMessage, RoomSettings, Room } from "@/types/game"
+import type { Player, ServerMessage, RoomSettings, Room } from "@/types/game"
 import { MATCH } from "@/lib/game/constants"
 import Link from "next/link"
 
@@ -52,8 +52,10 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
   // Store callbacks in refs to avoid useEffect re-runs
   const setRoomRef = useRef(setRoom)
   const routerRef = useRef(router)
+  const playerIdRef = useRef(playerId)
   setRoomRef.current = setRoom
   routerRef.current = router
+  playerIdRef.current = playerId
 
   // Connect using the selected backend: local demo or PartyKit realtime.
   // Only run once on mount
@@ -80,7 +82,14 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
           toast.success(`${message.player.nickname} joined the room`)
           break
         case "player_left":
-          toast.info("A player left the room")
+          if (message.playerId === playerIdRef.current) {
+            toast.error("You were kicked from the lobby")
+            fullDestroyGameClient()
+            resetAll()
+            routerRef.current.push("/play")
+          } else {
+            toast.info("A player left the room")
+          }
           break
         case "countdown_start":
           routerRef.current.push(`/game/${roomId}`)
@@ -162,6 +171,14 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
       toast.info("No open bot slots")
     }
   }
+
+  const handleKickPlayer = useCallback((player: Player) => {
+    const client = getGameClient()
+    if (!client || !isHost) return
+
+    client.kickPlayer(player.id)
+    toast.info(`Kicked ${player.nickname}`)
+  }, [isHost])
 
   const handleLeave = () => {
     fullDestroyGameClient()
@@ -259,6 +276,8 @@ export default function LobbyPage({ params }: { params: Promise<{ roomId: string
               currentPlayerId={playerId}
               hostId={displayRoom.hostId}
               maxPlayers={displayRoom.settings.maxPlayers}
+              isHost={isHost}
+              onKickPlayer={handleKickPlayer}
             />
 
             {isHost && displayRoom.state === "lobby" && (

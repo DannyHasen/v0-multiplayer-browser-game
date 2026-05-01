@@ -35,6 +35,7 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
   const wardens = gameState.bosses ?? (gameState.boss ? [gameState.boss] : [])
   const wardenHealth = wardens.reduce((total, boss) => total + Math.max(0, boss.health), 0)
   const wardenMaxHealth = wardens.reduce((total, boss) => total + boss.maxHealth, 0)
+  const bountyPlayer = gameState.players.find((player) => player.id === gameState.bountyPlayerId) ?? null
   const respawnSeconds = currentPlayer?.respawnAt
     ? Math.max(0, Math.ceil((currentPlayer.respawnAt - now) / 1000))
     : 0
@@ -151,6 +152,11 @@ export function HUDOverlay({ gameState, currentPlayer, roomCode, combatNotices =
               {formatTime(gameState.timeRemaining)}
             </span>
           </div>
+          {bountyPlayer && (
+            <div className="mt-2 rounded-md border border-yellow-400/50 px-2 py-1 text-[10px] uppercase tracking-wider text-yellow-300">
+              Bounty: {bountyPlayer.nickname}
+            </div>
+          )}
           {wardens.length > 0 && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
