@@ -113,6 +113,12 @@ const ARENA_EVENT_DURATION = 9000
 const MAX_BONUS_PICKUPS = 7
 const CONTROL_ZONE_RADIUS = 145
 const CONTROL_ZONE_POINTS_PER_SECOND = 8
+const RIFT_SURGE_FIRST_DELAY = 22000
+const RIFT_SURGE_INTERVAL = 30000
+const RIFT_SURGE_DURATION = 14000
+const RIFT_SURGE_RADIUS = 140
+const RIFT_SURGE_POINTS_PER_SECOND = 7
+const LONG_ROUND_THRESHOLD = 75
 const BOUNTY_SCORE_LEAD = 340
 const BOUNTY_MIN_SCORE = 500
 const BOUNTY_REWARD = 225
@@ -495,6 +501,9 @@ export class DemoClient {
   private lastControlScoreTime = 0
   private bountyPlayerId: string | null = null
   private lastBountyCheckTime = 0
+  private nextRiftSurgeAt = 0
+  private riftSurgeEndsAt = 0
+  private phaseEventsTriggered: Set<string> = new Set()
   private bonusPickupCounter = 0
   
   // Player input state
@@ -804,6 +813,9 @@ export class DemoClient {
     this.lastControlScoreTime = now
     this.bountyPlayerId = null
     this.lastBountyCheckTime = now
+    this.nextRiftSurgeAt = now + RIFT_SURGE_FIRST_DELAY
+    this.riftSurgeEndsAt = 0
+    this.phaseEventsTriggered.clear()
     this.runGameLoop()
   }
 
@@ -830,6 +842,9 @@ export class DemoClient {
     this.lastControlScoreTime = now
     this.bountyPlayerId = null
     this.lastBountyCheckTime = now
+    this.nextRiftSurgeAt = now + RIFT_SURGE_FIRST_DELAY
+    this.riftSurgeEndsAt = 0
+    this.phaseEventsTriggered.clear()
     this.bonusPickupCounter = 0
     this.runGameLoop()
   }
@@ -895,6 +910,7 @@ export class DemoClient {
       this.updateMeleeEnemies(now, elapsed)
       this.updateProjectiles(now)
       this.updateBombs(now)
+      this.updatePhaseEvents(now)
       this.updateArenaEvent(now, elapsed)
        
       // Process player movement
@@ -1192,13 +1208,18 @@ export class DemoClient {
       })
     }
 
-    if (this.room.settings.gameMode !== "control") {
-      this.controlZone = null
-      this.lastControlScoreTime = now
+    if (this.room.settings.gameMode === "control") {
+      this.awardZonePoints(this.updateControlZone(now), now, CONTROL_ZONE_POINTS_PER_SECOND)
       return
     }
 
-    const zone = this.updateControlZone(now)
+    this.updateRiftSurgeZone(now)
+    if (this.controlZone?.active && now < this.riftSurgeEndsAt) {
+      this.awardZonePoints(this.controlZone, now, RIFT_SURGE_POINTS_PER_SECOND)
+    }
+  }
+
+  private awardZonePoints(zone: ControlZoneState, now: number, basePointsPerSecond: number): void {
     if (now - this.lastControlScoreTime < 1000) return
 
     const ticks = Math.floor((now - this.lastControlScoreTime) / 1000)
@@ -1209,7 +1230,7 @@ export class DemoClient {
     zone.holders.forEach((playerId) => {
       this.addScore(
         this.playerStates.get(playerId),
-        CONTROL_ZONE_POINTS_PER_SECOND * ticks * contestedMultiplier,
+        basePointsPerSecond * ticks * contestedMultiplier,
         now,
         "control"
       )
@@ -1238,6 +1259,83 @@ export class DemoClient {
     }
 
     return this.controlZone
+  }
+
+  private shouldUseRiftSurges(): boolean {
+    return this.room.settings.matchDuration >= LONG_ROUND_THRESHOLD && this.room.settings.gameMode !== "control"
+  }
+
+  private updateRiftSurgeZone(now: number): void {
+    if (!this.shouldUseRiftSurges()) {
+      this.controlZone = null
+      this.lastControlScoreTime = now
+      return
+    }
+
+    if (this.nextRiftSurgeAt === 0) {
+      this.nextRiftSurgeAt = now + RIFT_SURGE_FIRST_DELAY
+    }
+
+    if (now >= this.riftSurgeEndsAt && this.controlZone?.active) {
+      this.controlZone = null
+      this.nextRiftSurgeAt = now + RIFT_SURGE_INTERVAL * (this.getRoundProgress(now) > 0.65 ? 0.72 : 1)
+      return
+    }
+
+    if (!this.controlZone && now >= this.nextRiftSurgeAt) {
+      this.startRiftSurge(now)
+    }
+
+    if (!this.controlZone || now >= this.riftSurgeEndsAt) return
+
+    const progress = clamp(1 - (this.riftSurgeEndsAt - now) / RIFT_SURGE_DURATION, 0, 1)
+    const storm = this.getStormState(now)
+    if (storm?.active) {
+      const dx = this.controlZone.x - storm.x
+      const dy = this.controlZone.y - storm.y
+      const distance = Math.max(1, Math.hypot(dx, dy))
+      const maxDistance = Math.max(30, storm.radius - this.controlZone.radius - 40)
+      if (distance > maxDistance) {
+        this.controlZone.x = storm.x + (dx / distance) * maxDistance
+        this.controlZone.y = storm.y + (dy / distance) * maxDistance
+      }
+    }
+
+    const radius = Math.max(95, RIFT_SURGE_RADIUS - progress * 26)
+    const holders = this.getLivingPlayerEntries()
+      .filter(({ state }) => Math.hypot(state.x - this.controlZone!.x, state.y - this.controlZone!.y) <= radius)
+      .map(({ player }) => player.id)
+
+    this.controlZone = {
+      ...this.controlZone,
+      radius,
+      holders,
+      contested: holders.length > 1,
+      pointsPerSecond: Math.round(RIFT_SURGE_POINTS_PER_SECOND * this.getModeConfig().controlMultiplier),
+    }
+  }
+
+  private startRiftSurge(now: number): void {
+    const position = this.getPickupSpawnPosition(now)
+    this.riftSurgeEndsAt = now + RIFT_SURGE_DURATION
+    this.lastControlScoreTime = now
+    this.controlZone = {
+      x: position.x,
+      y: position.y,
+      radius: RIFT_SURGE_RADIUS,
+      active: true,
+      contested: false,
+      holders: [],
+      pointsPerSecond: Math.round(RIFT_SURGE_POINTS_PER_SECOND * this.getModeConfig().controlMultiplier),
+    }
+    this.spawnBonusPickups(now)
+    this.arenaEvent = {
+      id: `rift-${now}`,
+      name: "Rift Surge",
+      description: "Hold the glowing rift for bonus points before it collapses.",
+      endsAt: this.riftSurgeEndsAt,
+      tone: "supply",
+    }
   }
 
   private updateBountyTarget(now: number): void {
@@ -1611,12 +1709,50 @@ export class DemoClient {
     }
   }
 
+  private updatePhaseEvents(now: number): void {
+    if (this.room.settings.matchDuration < LONG_ROUND_THRESHOLD) return
+
+    const progress = this.getRoundProgress(now)
+    if (progress >= 0.5 && !this.phaseEventsTriggered.has("midgame")) {
+      this.phaseEventsTriggered.add("midgame")
+      this.spawnBonusPickups(now)
+      this.nextRiftSurgeAt = Math.min(this.nextRiftSurgeAt || now, now + 5000)
+      this.arenaEvent = {
+        id: `phase-mid-${now}`,
+        name: "Midgame Surge",
+        description: "Bonus pickups and rift pressure are accelerating.",
+        endsAt: now + ARENA_EVENT_DURATION,
+        tone: "supply",
+      }
+    }
+
+    if (progress >= 0.78 && !this.phaseEventsTriggered.has("final")) {
+      this.phaseEventsTriggered.add("final")
+      this.spawnBonusPickups(now)
+      this.fireBossVolley(now)
+      const count = clamp(1 + Math.floor(this.room.players.length / 3), 2, 5)
+      for (let index = 0; index < count; index += 1) {
+        this.meleeEnemies.push(this.createMeleeEnemy(this.meleeEnemies.length, now))
+      }
+      this.nextRiftSurgeAt = Math.min(this.nextRiftSurgeAt || now, now + 3500)
+      this.arenaEvent = {
+        id: `phase-final-${now}`,
+        name: "Final Frenzy",
+        description: "Wardens, hunters, and rifts are all spiking before the clock runs out.",
+        endsAt: now + ARENA_EVENT_DURATION,
+        tone: "warden",
+      }
+    }
+  }
+
   private updateArenaEvent(now: number, elapsed: number): void {
     if (this.arenaEvent && now >= this.arenaEvent.endsAt) {
       this.arenaEvent = null
     }
 
-    const eventInterval = ARENA_EVENT_INTERVAL * this.getDifficultyConfig().eventIntervalMultiplier * this.getModeConfig().eventIntervalMultiplier
+    const progress = this.getRoundProgress(now)
+    const lateRoundMultiplier = progress > 0.82 ? 0.55 : progress > 0.6 ? 0.75 : 1
+    const eventInterval = ARENA_EVENT_INTERVAL * lateRoundMultiplier * this.getDifficultyConfig().eventIntervalMultiplier * this.getModeConfig().eventIntervalMultiplier
     if (elapsed * 1000 < ARENA_EVENT_FIRST_DELAY || now - this.lastArenaEventTime < eventInterval) {
       return
     }
@@ -2237,6 +2373,9 @@ export class DemoClient {
     this.lastControlScoreTime = 0
     this.bountyPlayerId = null
     this.lastBountyCheckTime = 0
+    this.nextRiftSurgeAt = 0
+    this.riftSurgeEndsAt = 0
+    this.phaseEventsTriggered.clear()
     this.bonusPickupCounter = 0
     this.currentInput = {
       up: false,
@@ -2453,7 +2592,7 @@ export class DemoClient {
     let mode: AIBehaviorMode = "wander"
     const roll = Math.random()
 
-    if (this.room.settings.gameMode === "control" && !lowHealth && roll < 0.68) {
+    if ((this.room.settings.gameMode === "control" || this.controlZone?.active) && !lowHealth && roll < (this.room.settings.gameMode === "control" ? 0.68 : 0.48)) {
       const zone = this.controlZone ?? this.updateControlZone(now)
       return {
         x: clamp(zone.x + (Math.random() - 0.5) * zone.radius * 0.7, 70, ARENA_WIDTH - 70),
